@@ -14,6 +14,7 @@ import { hashFileSync } from '../hasher/sha256.js';
 import { fromDbRelPath, isPathWithin } from '../paths/relpath.js';
 import { uniqueDest } from './uniqueDest.js';
 import { toLongPath } from '../paths/winLong.js';
+import { sentinelPaths } from '../target/sentinel.js';
 import { appendAudit } from '../audit/log.js';
 
 export type RestoreOutcome =
@@ -64,7 +65,19 @@ export function restoreOne(
     fromDbRelPath(action.src_rel_path),
   );
   const destAbs = action.dest_abs_path;
+  const { trashDir } = sentinelPaths(targetRoot);
 
+  // Trust boundary: action.dest_abs_path comes from the DB and could in
+  // theory be tampered with or corrupted. Without this fence, restoreOne
+  // would happily rename an attacker-chosen path into the live tree —
+  // turning a write to `quarantine_action` into arbitrary file movement
+  // anywhere on the volume. The mirror of purge.ts's fence.
+  if (!isPathWithin(trashDir, path.resolve(destAbs))) {
+    return {
+      kind: 'errored',
+      error: `quarantine source path is outside .dedupe-trash (got ${destAbs})`,
+    };
+  }
   if (!isPathWithin(targetRoot, sourceAbs)) {
     return { kind: 'errored', error: 'source path escapes target_root' };
   }

@@ -35,7 +35,7 @@ const DEPTH_WARN = 100;
  *   - Empty-directory tracking: returns a list of directories whose subtree
  *     contains zero non-symlink regular files. These are candidates for the
  *     `cruft_empty_folder` rule.
- *   - Depth tracking: maxDepthSeen is reported; >100 produces a warning entry.
+ *   - Depth tracking: maxDepthSeen is reported; ≥100 produces a warning entry.
  *   - The fallback per-dir lstat for empty-dir candidates surfaces ENOENT-
  *     and stat-errors into `result.errors`; the depth warning lands there too.
  *

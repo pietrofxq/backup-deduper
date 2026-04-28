@@ -118,4 +118,32 @@ describe('restore', () => {
     expect(fs.existsSync(path.join(root, 'Backup-A/b.jpg'))).toBe(true);
     db.client.close();
   });
+
+  it('refuses if dest_abs_path was tampered to point outside .dedupe-trash/', async () => {
+    const { db } = await setup();
+    const action = listActiveActions(db)[0]!;
+
+    // Plant a file outside the trash and rewrite the action to point at it.
+    // restoreOne would otherwise rename it into the live tree.
+    const outsideRoot = makeTmpDir('outside-trash-');
+    const outsideFile = path.join(outsideRoot, 'attacker.bin');
+    fs.writeFileSync(outsideFile, 'photo-bytes'); // matches recorded hash
+    db.client
+      .prepare('UPDATE quarantine_action SET dest_abs_path = ? WHERE id = ?')
+      .run(outsideFile, action.id);
+
+    try {
+      const out = restoreOne(db, root, action.id, { allowSidecar: false });
+      expect(out.kind).toBe('errored');
+      if (out.kind === 'errored') {
+        expect(out.error).toMatch(/outside .dedupe-trash/);
+      }
+      // The planted file is untouched and the live tree wasn't modified.
+      expect(fs.existsSync(outsideFile)).toBe(true);
+      expect(fs.existsSync(path.join(root, 'Backup-A/photo.jpg'))).toBe(false);
+    } finally {
+      db.client.close();
+      rmRf(outsideRoot);
+    }
+  });
 });

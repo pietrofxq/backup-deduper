@@ -3,7 +3,11 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { makeTmpDir, rmRf } from '../_helpers/tmp.js';
 import { ensureSentinel, isValidUuid, readSentinel, sentinelPaths } from '../../src/target/sentinel.js';
-import { runTargetGuard, TargetGuardError } from '../../src/target/guard.js';
+import {
+  runTargetGuard,
+  TargetGuardError,
+  type TargetGuardDeps,
+} from '../../src/target/guard.js';
 
 describe('sentinel', () => {
   let root: string;
@@ -48,17 +52,24 @@ describe('runTargetGuard', () => {
   function makeMockDeps() {
     let dbUuid: string | null = null;
     let dbRoot: string | null = null;
-    return {
+    let dbPlatform: string | null = null;
+    // The shape MUST match TargetGuardDeps exactly — bindDbUuid takes three
+    // args in production. Drift here would let a future API change slip
+    // through unnoticed.
+    const deps: TargetGuardDeps = {
       getDbUuid: () => dbUuid,
-      bindDbUuid: (uuid: string, r: string) => {
+      bindDbUuid: (uuid: string, r: string, osPlatform: string) => {
         dbUuid = uuid;
         dbRoot = r;
+        dbPlatform = osPlatform;
       },
       updateTargetRoot: (r: string) => {
         dbRoot = r;
       },
-      _peek: () => ({ dbUuid, dbRoot }),
     };
+    return Object.assign(deps, {
+      _peek: () => ({ dbUuid, dbRoot, dbPlatform }),
+    });
   }
 
   it('initializes both sides on first run', () => {
