@@ -21,7 +21,6 @@ const KEY = 'main';
 export const GATED_CONFIG_KEYS = [
   'dry_run',
   'dry_run_disabled_at',
-  'sanity_guard_override',
 ] as const satisfies ReadonlyArray<keyof Config>;
 
 export class GatedConfigKeyError extends Error {

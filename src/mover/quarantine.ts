@@ -53,24 +53,28 @@ export function quarantineDestFor(
 /**
  * Execute a list of planned actions in two-phase-commit order.
  *
- * Per action, in this exact order:
+ * Per action, in this exact order (matches the code below — keep in sync):
  *   1. pre-flight stat — if source disappeared, mark error and continue.
  *   2. re-hash from disk — if it differs from the classifier's hash, refuse
- *      and mark error. (This honors the safety invariant: never trust the old
- *      hash across the classify→move gap.)
- *   3. INSERT planned row (DB).
- *   4. mkdir -p the destination's parent directory.
- *   5. compute a unique destination via `uniqueDest()` — if the canonical
- *      dest path is already occupied (e.g. a residual from a prior crashed
+ *      and mark error. (This honors the safety invariant: never trust the
+ *      old hash across the classify→move gap.)
+ *   3. compute a unique destination via `uniqueDest()` — if the canonical
+ *      dest path is already occupied (e.g. residual from a prior crashed
  *      run, or a name collision), pick `<basename> (1).<ext>`,
- *      `<basename> (2).<ext>`, etc. so the rename never overwrites.
+ *      `<basename> (2).<ext>`, etc. so the rename never overwrites. Pure
+ *      path computation — no fs writes.
+ *   4. mkdir -p the destination's parent directory. Idempotent.
+ *   5. INSERT planned row (DB). The two-phase-commit invariant requires
+ *      the row to exist before any rename; everything in steps 3–4 is safe
+ *      to redo on a crash because they don't move bytes yet.
  *   6. fs.renameSync source → destination.
- *   7. post-move verify: stat destination, compare size to the recorded size.
+ *   7. post-move verify: stat destination, compare size to recorded size.
  *   8. UPDATE row to set executed_at + verified_at.
- *   9. DELETE file row from `file` (it's now in quarantine, not the live tree).
+ *   9. DELETE file row from `file` (it's now in quarantine, not the live
+ *      tree).
  *
- * If the process is killed between (3) and (8), startup reconcile in
- * mover/reconcile.ts handles the leftover row.
+ * If the process is killed between (5) and (8), startup reconcile in
+ * mover/reconcile.ts re-verifies the dest before promoting executed_at.
  */
 export function executeQuarantine(
   deps: QuarantineDeps,
@@ -160,7 +164,7 @@ export function executeQuarantine(
       }
     }
 
-    // 3. compute destination, ensure parent, INSERT planned row
+    // 3-5. compute destination, ensure parent, INSERT planned row.
     const desiredDest = quarantineDestFor(
       targetRoot,
       runId,
@@ -181,7 +185,7 @@ export function executeQuarantine(
       reason: action.reason,
     });
 
-    // 4-5. same-volume rename. Refuse if root differs (defensive).
+    // 6. same-volume rename. Refuse if root differs (defensive).
     if (path.parse(srcAbs).root !== path.parse(destAbs).root) {
       markActionError(db, actionId, 'cross-volume rename rejected');
       summary.errored += 1;
@@ -195,7 +199,7 @@ export function executeQuarantine(
       continue;
     }
 
-    // 6. post-move verify
+    // 7. post-move verify
     let postStat: fs.Stats;
     try {
       postStat = fs.lstatSync(toLongPath(destAbs));
@@ -224,9 +228,9 @@ export function executeQuarantine(
       continue;
     }
 
-    // 7. mark executed
+    // 8. mark executed
     markActionExecuted(db, actionId);
-    // 8. drop live file row — it's now under quarantine.
+    // 9. drop live file row — it's now under quarantine.
     deleteFileRow(db, action.collection.id, action.file.rel_path);
     summary.executed += 1;
   }

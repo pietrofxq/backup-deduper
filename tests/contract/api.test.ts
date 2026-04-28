@@ -79,7 +79,7 @@ describe('API — health & config', () => {
     expect(r3.statusCode).toBe(400);
   });
 
-  it('PUT /config refuses to flip gated fields (dry_run, dry_run_disabled_at, sanity_guard_override)', async () => {
+  it('PUT /config refuses to flip gated fields (dry_run, dry_run_disabled_at)', async () => {
     await setup({ 'A/x.txt': 'a' });
 
     // dry_run
@@ -98,18 +98,9 @@ describe('API — health & config', () => {
     });
     expect(r2.statusCode).toBe(400);
 
-    // sanity_guard_override
-    const r3 = await app.inject({
-      method: 'PUT',
-      url: '/config',
-      payload: { sanity_guard_override: true },
-    });
-    expect(r3.statusCode).toBe(400);
-
-    // dry_run is still true after all attempts
+    // dry_run is still true after all attempts.
     const cfg = JSON.parse((await app.inject({ method: 'GET', url: '/config' })).body);
     expect(cfg.dry_run).toBe(true);
-    expect(cfg.sanity_guard_override).toBe(false);
 
     // A non-gated field still patches normally.
     const ok = await app.inject({

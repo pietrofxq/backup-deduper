@@ -70,6 +70,10 @@ describe('safety invariant — every primary byte-content remains reachable', ()
     await fc.assert(
       fc.asyncProperty(arbitraryTree, async (tree) => {
         const baseRoot = makeTmpDir('safety-prop-');
+        // Track the DB handle in the outer scope so a `return false` (or any
+        // exception) cannot leak it. Leaking on Windows blocks rmRf via
+        // EBUSY and can pile up handles across shrinking/replays.
+        let db: ReturnType<typeof openDb> | null = null;
         try {
           // Materialize tree on disk.
           // Each collection name may repeat across the array; deduplicate by
@@ -93,7 +97,7 @@ describe('safety invariant — every primary byte-content remains reachable', ()
           }
 
           await boot({ targetRoot: baseRoot, noServe: true });
-          const db = openDb(baseRoot);
+          db = openDb(baseRoot);
           syncCollectionsTable(db, baseRoot);
 
           // Mark the chosen collection as primary.
@@ -141,9 +145,17 @@ describe('safety invariant — every primary byte-content remains reachable', ()
               return false;
             }
           }
-          db.client.close();
           return true;
         } finally {
+          // Close BEFORE rmRf so Windows can unlink state.db; runs on every
+          // exit path (success, failure, exception, fast-check shrinking).
+          if (db) {
+            try {
+              db.client.close();
+            } catch {
+              /* ignore double-close */
+            }
+          }
           rmRf(baseRoot);
         }
       }),
