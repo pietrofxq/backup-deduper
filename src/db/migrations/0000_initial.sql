@@ -27,7 +27,7 @@ CREATE TABLE `file` (
 CREATE UNIQUE INDEX `idx_file_collection_relpath` ON `file` (`collection_id`,`rel_path`);--> statement-breakpoint
 CREATE INDEX `idx_file_sha256` ON `file` (`sha256_hex`) WHERE "file"."sha256_hex" IS NOT NULL;--> statement-breakpoint
 CREATE INDEX `idx_file_collection` ON `file` (`collection_id`);--> statement-breakpoint
-CREATE INDEX `idx_file_basename` ON `file` (`rel_path`);--> statement-breakpoint
+CREATE INDEX `idx_file_relpath` ON `file` (`rel_path`);--> statement-breakpoint
 CREATE TABLE `preset` (
 	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
 	`name` text NOT NULL,

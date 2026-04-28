@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "0c52e880-3fd5-4ff8-8a8e-1b7d55e213af",
+  "id": "06ce892e-c9c3-430b-bee3-e896c5f45d07",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "tables": {
     "collection": {
@@ -169,8 +169,8 @@
           ],
           "isUnique": false
         },
-        "idx_file_basename": {
-          "name": "idx_file_basename",
+        "idx_file_relpath": {
+          "name": "idx_file_relpath",
           "columns": [
             "rel_path"
           ],

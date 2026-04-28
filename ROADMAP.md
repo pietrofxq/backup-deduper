@@ -16,7 +16,7 @@ The codebase is cross-platform (develop on Linux/macOS/Windows). Runtime targets
 ### ✅ M1. Skeleton + DB + target-sentinel guard
 - ✅ `package.json`, `tsconfig.json` (`strict`, `noUncheckedIndexedAccess`), `vitest.config.ts`.
 - ✅ `src/main.ts` boots; `src/db/migrate.ts` applies the initial migration.
-- ✅ `src/target/sentinel.ts` reads/creates `<target_root>/.dedupe/target-id.txt` (built-in `crypto.randomUUID()`); no shell calls.
+- ✅ `src/target/sentinel.ts` reads/creates `<target_root>/.dedupe/target-id.txt` (built-in `crypto.randomUUID()`). The only shell call is a best-effort `attrib +H` on Windows to mark the `.dedupe` folder hidden; failures are swallowed.
 - ✅ `src/target/guard.ts` refuses to start if the live UUID doesn't match `target.target_id_uuid` in the DB; logs the absolute path discrepancy when one occurs.
 - ✅ `src/paths/platform.ts` detects OS once at startup; `winLong.ts` no-ops on POSIX.
 - **Smoke:** ✅ app boots against an empty tmp dir, generates the sentinel + DB, refuses on a wrong-UUID mock.

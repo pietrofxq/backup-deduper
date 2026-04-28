@@ -60,12 +60,16 @@ export function quarantineDestFor(
  *      hash across the classify→move gap.)
  *   3. INSERT planned row (DB).
  *   4. mkdir -p the destination's parent directory.
- *   5. fs.renameSync source → destination. Refuse if dest already exists.
- *   6. post-move verify: stat destination, compare size to the recorded size.
- *   7. UPDATE row to set executed_at + verified_at.
- *   8. DELETE file row from `file` (it's now in quarantine, not the live tree).
+ *   5. compute a unique destination via `uniqueDest()` — if the canonical
+ *      dest path is already occupied (e.g. a residual from a prior crashed
+ *      run, or a name collision), pick `<basename> (1).<ext>`,
+ *      `<basename> (2).<ext>`, etc. so the rename never overwrites.
+ *   6. fs.renameSync source → destination.
+ *   7. post-move verify: stat destination, compare size to the recorded size.
+ *   8. UPDATE row to set executed_at + verified_at.
+ *   9. DELETE file row from `file` (it's now in quarantine, not the live tree).
  *
- * If the process is killed between (3) and (7), startup reconcile in
+ * If the process is killed between (3) and (8), startup reconcile in
  * mover/reconcile.ts handles the leftover row.
  */
 export function executeQuarantine(

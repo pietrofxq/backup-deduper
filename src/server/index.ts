@@ -7,18 +7,10 @@ import {
 import type { Db } from '../db/index.js';
 import { registerRoutes } from './routes/index.js';
 
-/**
- * App type with Zod type provider attached. Routes typed against this get
- * automatic request/response validation + inferred parameter types from the
- * inline `schema` block.
- */
-export type App = FastifyInstance<
-  ReturnType<typeof Fastify>['server'] extends infer _ ? never : never,
-  never,
-  never,
-  never,
-  ZodTypeProvider
->;
+export type { ZodTypeProvider };
+// Routes use the typed-app alias from `./types.js` (`ZodApp`). Don't add
+// another typed-app alias here — having two competing definitions invites
+// drift and the previous one resolved to `never` due to a TS quirk.
 
 export interface ServerDeps {
   db: Db;

@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import fs from 'node:fs';
+import path from 'node:path';
 import { makeTmpDir, rmRf, buildTree } from '../_helpers/tmp.js';
 import { boot } from '../../src/main.js';
 import { openDb } from '../../src/db/index.js';
@@ -71,13 +72,32 @@ describe('purge', () => {
 
   it('refuses to purge a file whose dest_abs_path is outside the trash dir', async () => {
     const db = await setupQuarantined();
-    // Tamper with a quarantine action to point outside trashDir.
-    db.client.prepare('UPDATE quarantine_action SET dest_abs_path = ? WHERE id = 1').run('/etc/passwd');
-    const future = new Date(Date.now() + 60 * 86_400_000);
-    const summary = purge({ db, targetRoot: root, retentionDays: 30, dryRun: false, now: future });
-    expect(summary.errored).toBe(1);
-    expect(summary.purgedFiles).toBe(0);
-    expect(fs.existsSync('/etc/passwd')).toBe(true); // sanity
-    db.client.close();
+    // Plant a real file outside the trash dir (and outside target_root) so
+    // we can verify purge refused to touch it without depending on any
+    // OS-specific path. The previous version used /etc/passwd which would
+    // not exist on Windows runners.
+    const outsideRoot = makeTmpDir('outside-trash-');
+    const outsideFile = path.join(outsideRoot, 'sentinel.txt');
+    fs.writeFileSync(outsideFile, 'should-not-be-purged');
+
+    try {
+      db.client
+        .prepare('UPDATE quarantine_action SET dest_abs_path = ? WHERE id = 1')
+        .run(outsideFile);
+      const future = new Date(Date.now() + 60 * 86_400_000);
+      const summary = purge({
+        db,
+        targetRoot: root,
+        retentionDays: 30,
+        dryRun: false,
+        now: future,
+      });
+      expect(summary.errored).toBe(1);
+      expect(summary.purgedFiles).toBe(0);
+      expect(fs.existsSync(outsideFile)).toBe(true);
+    } finally {
+      db.client.close();
+      rmRf(outsideRoot);
+    }
   });
 });

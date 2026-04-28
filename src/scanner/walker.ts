@@ -32,11 +32,17 @@ const DEPTH_WARN = 100;
  *
  * Properties guaranteed:
  *   - Symlinks (file or dir) are explicitly rejected, never followed.
- *   - Per-entry stat errors are collected, not thrown.
  *   - Empty-directory tracking: returns a list of directories whose subtree
  *     contains zero non-symlink regular files. These are candidates for the
  *     `cruft_empty_folder` rule.
  *   - Depth tracking: maxDepthSeen is reported; >100 produces a warning entry.
+ *   - The fallback per-dir lstat for empty-dir candidates surfaces ENOENT-
+ *     and stat-errors into `result.errors`; the depth warning lands there too.
+ *
+ * Limitation, flagged for M11: the underlying fast-glob calls use
+ * `suppressErrors: true`, so per-file glob errors (EACCES, etc.) are
+ * silently dropped instead of recorded. Re-enabling and capturing them
+ * needs a streaming fast-glob call wired through an error event.
  */
 export async function walkCollection(collectionRoot: string): Promise<WalkResult> {
   const result: WalkResult = {

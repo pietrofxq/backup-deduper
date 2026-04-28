@@ -76,7 +76,10 @@ export const file = sqliteTable(
     uniqueIndex('idx_file_collection_relpath').on(t.collectionId, t.relPath),
     index('idx_file_sha256').on(t.sha256Hex).where(sql`${t.sha256Hex} IS NOT NULL`),
     index('idx_file_collection').on(t.collectionId),
-    index('idx_file_basename').on(t.relPath),
+    // Indexes the full rel_path, not the basename. The basename-grouping
+    // pass in classifier/nameCollision.ts is in-memory, so this index just
+    // accelerates path-prefix lookups during scanning.
+    index('idx_file_relpath').on(t.relPath),
   ],
 );
 

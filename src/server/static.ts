@@ -110,6 +110,19 @@ async function api(method, url, body) {
   return { ok: r.ok, status: r.status, json, text };
 }
 
+// Helpers — every value coming from the API or filesystem (path, basename,
+// reason, error message) is set via textContent, never innerHTML. File
+// names can contain HTML metacharacters and we run on localhost where the
+// user's own files are the only "input" the UI sees.
+function el(tag, opts = {}) {
+  const e = document.createElement(tag);
+  if (opts.text != null) e.textContent = String(opts.text);
+  if (opts.cls) e.className = opts.cls;
+  return e;
+}
+function td(text) { return el('td', { text }); }
+function clear(node) { while (node.firstChild) node.removeChild(node.firstChild); }
+
 async function refresh() {
   const [health, cfg, cols] = await Promise.all([
     api('GET', '/health'),
@@ -123,14 +136,19 @@ async function refresh() {
   badge.className = 'badge ' + (dry ? '' : 'ok');
 
   const tbody = $('collectionsTable').querySelector('tbody');
-  tbody.innerHTML = '';
+  clear(tbody);
   for (const c of cols.json ?? []) {
-    const tr = document.createElement('tr');
-    tr.innerHTML = '<td>' + c.relPath + '</td><td>' + (c.isPrimary ? '✓' : '') + '</td><td><button data-id="' + c.id + '">Set primary</button></td>';
-    tr.querySelector('button').onclick = async () => {
+    const tr = el('tr');
+    tr.appendChild(td(c.relPath));
+    tr.appendChild(td(c.isPrimary ? '✓' : ''));
+    const actionTd = el('td');
+    const btn = el('button', { text: 'Set primary' });
+    btn.onclick = async () => {
       await api('POST', '/collections/set-primary', { collectionId: c.id });
       refresh();
     };
+    actionTd.appendChild(btn);
+    tr.appendChild(actionTd);
     tbody.appendChild(tr);
   }
   await refreshQ();
@@ -139,48 +157,94 @@ async function refresh() {
 
 async function refreshQ() {
   const tbody = $('quarantineTable').querySelector('tbody');
-  tbody.innerHTML = '';
+  clear(tbody);
   const r = await api('GET', '/quarantine');
   for (const a of r.json ?? []) {
-    const tr = document.createElement('tr');
-    tr.innerHTML = '<td>' + a.id + '</td><td>' + a.collection_id + '</td><td>' + a.src_rel_path + '</td><td>' + a.reason + '</td><td>' + a.size + '</td><td><button data-id="' + a.id + '">Restore</button></td>';
-    tr.querySelector('button').onclick = async () => {
+    const tr = el('tr');
+    tr.appendChild(td(a.id));
+    tr.appendChild(td(a.collection_id));
+    tr.appendChild(td(a.src_rel_path));
+    tr.appendChild(td(a.reason));
+    tr.appendChild(td(a.size));
+    const actionTd = el('td');
+    const btn = el('button', { text: 'Restore' });
+    btn.onclick = async () => {
       await api('POST', '/quarantine/restore', { actionIds: [a.id] });
       refreshQ();
     };
+    actionTd.appendChild(btn);
+    tr.appendChild(actionTd);
     tbody.appendChild(tr);
   }
 }
 
 async function refreshReview() {
   const tbody = $('reviewTable').querySelector('tbody');
-  tbody.innerHTML = '';
+  clear(tbody);
   const r = await api('GET', '/review?status=open');
   for (const item of r.json ?? []) {
-    const tr = document.createElement('tr');
-    tr.innerHTML = '<td>' + item.basename + '</td><td>' + item.a_rel_path + '<br><small>' + item.a_sha256_hex.slice(0,8) + '</small></td><td>' + item.b_rel_path + '<br><small>' + item.b_sha256_hex.slice(0,8) + '</small></td><td><button data-act="kept_both">keep both</button></td>';
-    tr.querySelector('button').onclick = async () => {
+    const tr = el('tr');
+    tr.appendChild(td(item.basename));
+    const aTd = el('td');
+    aTd.appendChild(el('span', { text: item.a_rel_path }));
+    aTd.appendChild(el('br'));
+    aTd.appendChild(el('small', { text: item.a_sha256_hex.slice(0, 8) }));
+    tr.appendChild(aTd);
+    const bTd = el('td');
+    bTd.appendChild(el('span', { text: item.b_rel_path }));
+    bTd.appendChild(el('br'));
+    bTd.appendChild(el('small', { text: item.b_sha256_hex.slice(0, 8) }));
+    tr.appendChild(bTd);
+    const actionTd = el('td');
+    const btn = el('button', { text: 'keep both' });
+    btn.onclick = async () => {
       await api('POST', '/review/' + item.id + '/decision', { status: 'kept_both' });
       refreshReview();
     };
+    actionTd.appendChild(btn);
+    tr.appendChild(actionTd);
     tbody.appendChild(tr);
   }
+}
+
+function setReportBox(rep) {
+  const box = $('reportBox');
+  clear(box);
+  const h = el('h3', { text: 'Run ' + rep.runId });
+  box.appendChild(h);
+  const total = el('div');
+  total.appendChild(document.createTextNode('Total actions: '));
+  const b = el('b', { text: String(rep.totalActions) });
+  total.appendChild(b);
+  total.appendChild(document.createTextNode(' (' + rep.totalBytes + ' bytes)'));
+  box.appendChild(total);
+  box.appendChild(el('div', { text: 'Review pairs: ' + rep.reviewPairs + ', empty dirs: ' + rep.emptyDirActions }));
+  box.appendChild(
+    el('div', {
+      text:
+        'Sanity guard: ' +
+        (rep.sanityGuard.passed
+          ? '✓ passed'
+          : '✗ TRIPPED — ' + (rep.sanityGuard.reason ?? '')),
+    }),
+  );
+  box.appendChild(el('pre', { text: JSON.stringify(rep.countsByReason, null, 2) }));
 }
 
 $('scanBtn').onclick = async () => {
   $('lastRunStatus').textContent = 'Scanning…';
   const r = await api('POST', '/scans', {});
-  if (!r.ok) { $('reportBox').innerHTML = '<div class="danger">scan failed</div><pre>' + r.text + '</pre>'; return; }
+  if (!r.ok) {
+    const box = $('reportBox');
+    clear(box);
+    box.appendChild(el('div', { text: 'scan failed', cls: 'danger' }));
+    box.appendChild(el('pre', { text: r.text }));
+    return;
+  }
   lastScanRunId = r.json.runId;
   $('quarantineBtn').disabled = false;
-  const rep = r.json.report;
-  $('reportBox').innerHTML =
-    '<h3>Run ' + rep.runId + '</h3>' +
-    '<div>Total actions: <b>' + rep.totalActions + '</b> (' + rep.totalBytes + ' bytes)</div>' +
-    '<div>Review pairs: ' + rep.reviewPairs + ', empty dirs: ' + rep.emptyDirActions + '</div>' +
-    '<div>Sanity guard: ' + (rep.sanityGuard.passed ? '✓ passed' : '✗ TRIPPED — ' + rep.sanityGuard.reason) + '</div>' +
-    '<pre>' + JSON.stringify(rep.countsByReason, null, 2) + '</pre>';
-  $('lastRunStatus').textContent = 'last scan: run ' + rep.runId;
+  setReportBox(r.json.report);
+  $('lastRunStatus').textContent = 'last scan: run ' + r.json.report.runId;
   refresh();
 };
 
@@ -188,16 +252,20 @@ $('quarantineBtn').onclick = async () => {
   if (!lastScanRunId) return;
   if (!confirm('Run quarantine for scan ' + lastScanRunId + '?')) return;
   const r = await api('POST', '/quarantine/run', { scanRunId: lastScanRunId });
-  $('reportBox').innerHTML += '<pre>' + JSON.stringify(r.json, null, 2) + '</pre>';
+  $('reportBox').appendChild(el('pre', { text: JSON.stringify(r.json, null, 2) }));
   refresh();
 };
 
 $('disableBtn').onclick = async () => {
   const phrase = $('phrase').value;
   const r = await api('POST', '/config/disable-dry-run', { phrase });
-  $('disableMsg').innerHTML = r.ok
-    ? '<div class="badge ok">dry-run disabled</div>'
-    : '<div class="danger">' + (r.json?.error ?? 'failed') + '</div>';
+  const msg = $('disableMsg');
+  clear(msg);
+  if (r.ok) {
+    msg.appendChild(el('div', { text: 'dry-run disabled', cls: 'badge ok' }));
+  } else {
+    msg.appendChild(el('div', { text: r.json?.error ?? 'failed', cls: 'danger' }));
+  }
   refresh();
 };
 

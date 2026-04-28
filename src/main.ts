@@ -1,5 +1,6 @@
 import path from 'node:path';
 import fs from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { detectPlatform } from './paths/platform.js';
 import { sentinelPaths } from './target/sentinel.js';
 import { runTargetGuard } from './target/guard.js';
@@ -70,6 +71,10 @@ export async function boot(opts: BootOptions): Promise<BootResult> {
   loadConfig(db);
 
   if (opts.noServe) {
+    // Important: in noServe mode the caller (typically a test) does not get
+    // the DB handle, so close it here. Holding it open leaks an fd and on
+    // Windows blocks subsequent test runs from removing the .dedupe folder.
+    db.client.close();
     return { targetRoot, uuid: guardResult.uuid, port: 0 };
   }
   const port = opts.port ?? Number(process.env.PORT ?? 7777);
@@ -81,9 +86,12 @@ export async function boot(opts: BootOptions): Promise<BootResult> {
 const isMain = (() => {
   if (typeof process.argv[1] !== 'string') return false;
   // Compare resolved real paths to detect direct invocation reliably.
+  // Use fileURLToPath, not URL.pathname — on Windows the latter returns
+  // `/C:/...` (with leading slash and URL-encoding), which makes
+  // realpathSync throw or return a non-comparable string.
   try {
     const argvPath = fs.realpathSync(process.argv[1]);
-    const here = fs.realpathSync(new URL(import.meta.url).pathname);
+    const here = fs.realpathSync(fileURLToPath(import.meta.url));
     return argvPath === here;
   } catch {
     return false;

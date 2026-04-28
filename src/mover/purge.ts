@@ -10,6 +10,7 @@ import {
 } from '../db/queries.js';
 import { sentinelPaths } from '../target/sentinel.js';
 import { toLongPath } from '../paths/winLong.js';
+import { isPathWithin } from '../paths/relpath.js';
 import { appendAudit } from '../audit/log.js';
 
 export interface PurgeOptions {
@@ -68,10 +69,14 @@ export function purge(opts: PurgeOptions): PurgeSummary {
       summary.eligible += 1;
 
       const dest = a.dest_abs_path;
-      // Hard guard: must live inside trashDir.
+      // Hard guard: must live strictly inside trashDir. Use path.relative
+      // (case-insensitive on Windows, case-sensitive on POSIX — matching the
+      // FS) instead of a startsWith on resolved absolutes; otherwise drive-
+      // letter casing variance on Windows would make legitimate paths fail
+      // the fence (or, worse, an attacker-controlled casing could pass it).
       const abs = path.resolve(dest);
       const trashAbs = path.resolve(trashDir);
-      if (!abs.startsWith(trashAbs + path.sep) && abs !== trashAbs) {
+      if (!isPathWithin(trashAbs, abs)) {
         appendAudit(targetRoot, 'purge_refused', {
           actionId: a.id,
           dest,
