@@ -9,6 +9,8 @@ import {
   runQuarantineJob,
   SanityGuardError,
 } from '../../orchestrator/quarantineJob.js';
+import { UnreadableSubtreeError } from '../../scanner/index.js';
+import { UnknownPresetError } from '../../presets/registry.js';
 
 const StartScanBody = z.object({
   presetName: z.string().optional(),
@@ -43,14 +45,32 @@ export async function registerScanRoutes(app: ZodApp, deps: ServerDeps): Promise
   app.post(
     '/scans',
     { schema: { body: StartScanBody.optional() } },
-    async (req) => {
-      const result = await runScanJob(deps.db, deps.targetRoot, req.body ?? {});
-      rememberScan(result);
-      return {
-        runId: result.runId,
-        reportPath: result.reportPath,
-        report: result.report,
-      };
+    async (req, reply) => {
+      try {
+        const result = await runScanJob(deps.db, deps.targetRoot, req.body ?? {});
+        rememberScan(result);
+        return {
+          runId: result.runId,
+          reportPath: result.reportPath,
+          report: result.report,
+        };
+      } catch (err) {
+        if (err instanceof DryRunGateError) {
+          return reply.code(400).send({ error: err.message, kind: 'dry_run_gate' });
+        }
+        if (err instanceof UnreadableSubtreeError) {
+          return reply.code(409).send({
+            error: err.message,
+            kind: 'unreadable_subtree',
+            unreadablePaths: err.unreadablePaths,
+            collectionRelPath: err.collectionRelPath,
+          });
+        }
+        if (err instanceof UnknownPresetError) {
+          return reply.code(404).send({ error: err.message, kind: 'unknown_preset' });
+        }
+        throw err;
+      }
     },
   );
 

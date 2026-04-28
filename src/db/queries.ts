@@ -90,8 +90,30 @@ export function upsertCollection(db: Db, relPath: string): CollectionRow {
   return rowCollection(row);
 }
 
+export class UnknownCollectionError extends Error {
+  constructor(public readonly collectionId: number) {
+    super(`No collection with id=${collectionId}`);
+    this.name = 'UnknownCollectionError';
+  }
+}
+
+/**
+ * Mark a collection as primary. The transaction must be all-or-nothing:
+ * if `collectionId` doesn't exist, we MUST NOT have already cleared the
+ * existing primary — otherwise a stale id leaves the system with no
+ * primary at all, which silently disables the cross-collection keeper
+ * preference and the sanity-guard's "% of primary" math.
+ */
 export function setPrimary(db: Db, collectionId: number): void {
   db.q.transaction((tx) => {
+    const exists = tx
+      .select({ id: s.collection.id })
+      .from(s.collection)
+      .where(eq(s.collection.id, collectionId))
+      .get();
+    if (!exists) {
+      throw new UnknownCollectionError(collectionId);
+    }
     tx.update(s.collection).set({ isPrimary: 0 }).where(eq(s.collection.isPrimary, 1)).run();
     tx.update(s.collection).set({ isPrimary: 1 }).where(eq(s.collection.id, collectionId)).run();
   });

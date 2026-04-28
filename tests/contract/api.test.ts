@@ -172,6 +172,42 @@ describe('API — health & config', () => {
   });
 });
 
+describe('API — safety gates around scan/preset overrides', () => {
+  it('POST /scans with dryRun:false while config.dry_run=true returns 400 dry_run_gate', async () => {
+    await setup({ 'A/x.txt': 'a' });
+    const r = await app.inject({
+      method: 'POST',
+      url: '/scans',
+      payload: { dryRun: false },
+    });
+    expect(r.statusCode).toBe(400);
+    const body = JSON.parse(r.body);
+    expect(body.kind).toBe('dry_run_gate');
+  });
+
+  it('POST /scans with unknown presetName returns 404 unknown_preset', async () => {
+    await setup({ 'A/x.txt': 'a' });
+    const r = await app.inject({
+      method: 'POST',
+      url: '/scans',
+      payload: { presetName: 'definitely-not-a-real-preset' },
+    });
+    expect(r.statusCode).toBe(404);
+    const body = JSON.parse(r.body);
+    expect(body.kind).toBe('unknown_preset');
+  });
+
+  it('POST /collections/set-primary with unknown id returns 404', async () => {
+    await setup({ 'A/x.txt': 'a' });
+    const r = await app.inject({
+      method: 'POST',
+      url: '/collections/set-primary',
+      payload: { collectionId: 999_999 },
+    });
+    expect(r.statusCode).toBe(404);
+  });
+});
+
 describe('API — collections, presets', () => {
   it('GET /collections lists discovered collections; POST set-primary marks one', async () => {
     await setup({

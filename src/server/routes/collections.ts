@@ -1,7 +1,11 @@
 import { z } from 'zod';
 import type { ServerDeps } from '../index.js';
 import type { ZodApp } from '../types.js';
-import { listCollections, setPrimary } from '../../db/queries.js';
+import {
+  listCollections,
+  setPrimary,
+  UnknownCollectionError,
+} from '../../db/queries.js';
 import { syncCollectionsTable } from '../../scanner/index.js';
 
 const Collection = z.object({
@@ -15,6 +19,7 @@ const SetPrimaryBody = z.object({
 });
 
 const Ok = z.object({ ok: z.literal(true) });
+const ErrorResponse = z.object({ error: z.string() });
 
 export async function registerCollectionRoutes(
   app: ZodApp,
@@ -35,10 +40,22 @@ export async function registerCollectionRoutes(
 
   app.post(
     '/collections/set-primary',
-    { schema: { body: SetPrimaryBody, response: { 200: Ok } } },
-    async (req) => {
-      setPrimary(deps.db, req.body.collectionId);
-      return { ok: true as const };
+    {
+      schema: {
+        body: SetPrimaryBody,
+        response: { 200: Ok, 404: ErrorResponse },
+      },
+    },
+    async (req, reply) => {
+      try {
+        setPrimary(deps.db, req.body.collectionId);
+        return { ok: true as const };
+      } catch (err) {
+        if (err instanceof UnknownCollectionError) {
+          return reply.code(404).send({ error: err.message });
+        }
+        throw err;
+      }
     },
   );
 }

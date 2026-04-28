@@ -26,16 +26,29 @@ export function seedBuiltinPresets(db: Db): void {
   }
 }
 
+export class UnknownPresetError extends Error {
+  constructor(public readonly presetName: string) {
+    super(`Unknown preset: "${presetName}"`);
+    this.name = 'UnknownPresetError';
+  }
+}
+
 export function loadActivePreset(db: Db): Preset {
   const cfg = loadConfig(db);
   return loadPresetByName(db, cfg.active_preset);
 }
 
+/**
+ * Throws UnknownPresetError if the requested preset name does not exist in
+ * the DB. Earlier this silently fell back to the Samsung preset, which
+ * meant a stale config or mistyped name would classify with the wrong
+ * ruleset while the report still recorded the requested name — a silent
+ * ruleset switch in a destructive workflow.
+ */
 export function loadPresetByName(db: Db, name: string): Preset {
   const row = getPresetByName(db, name);
   if (!row) {
-    // Fall back to first builtin if the configured preset is unknown.
-    return SAMSUNG_ANDROID;
+    throw new UnknownPresetError(name);
   }
   return PresetSchema.parse({
     name: row.name,

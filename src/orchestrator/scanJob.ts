@@ -13,6 +13,7 @@ import { scanAll, type ScanProgressEvent, type ScanSummary } from '../scanner/in
 import { classifyAll, type PlannedAction, type ReviewPair, type EmptyDir } from '../classifier/rules.js';
 import { loadActivePreset } from '../presets/index.js';
 import { loadPresetByName } from '../presets/registry.js';
+import { DryRunGateError } from './quarantineJob.js';
 import { loadConfig } from '../config/loader.js';
 import { checkSanityGuard, type SanityGuardResult } from './sanityGuard.js';
 import { appendAudit } from '../audit/log.js';
@@ -86,7 +87,18 @@ export async function runScanJob(
   opts: ScanJobOptions = {},
 ): Promise<ScanJobResult> {
   const cfg = loadConfig(db);
-  const dryRun = opts.dryRun ?? cfg.dry_run;
+  // Per-call dry-run can only ever be MORE restrictive than persisted state.
+  // Allowing opts.dryRun=false to override cfg.dry_run=true would produce a
+  // run/report claiming "live" while runQuarantineJob still refuses (it
+  // reads cfg directly), giving callers a misleading report. Force dry-run
+  // off only if the persisted gate is also off.
+  if (opts.dryRun === false && cfg.dry_run === true) {
+    throw new DryRunGateError(
+      'Cannot request dryRun=false: the persisted config still has dry_run=true. ' +
+        'Disable dry-run via POST /config/disable-dry-run with the confirmation phrase first.',
+    );
+  }
+  const dryRun = opts.dryRun === true ? true : cfg.dry_run;
   const presetName = opts.presetName ?? cfg.active_preset;
   const preset = opts.presetName
     ? loadPresetByName(db, opts.presetName)

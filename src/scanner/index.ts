@@ -13,6 +13,17 @@ import {
 } from '../db/queries.js';
 import { DEDUPE_DIR_NAME, TRASH_DIR_NAME } from '../target/sentinel.js';
 
+export class UnreadableSubtreeError extends Error {
+  constructor(
+    message: string,
+    public readonly unreadablePaths: ReadonlyArray<string>,
+    public readonly collectionRelPath: string,
+  ) {
+    super(message);
+    this.name = 'UnreadableSubtreeError';
+  }
+}
+
 export interface CollectionScanSummary {
   collectionId: number;
   collectionRelPath: string;
@@ -137,6 +148,24 @@ async function scanCollection(
 ): Promise<{ summary: CollectionScanSummary; emptyDirRelPaths: string[] }> {
   const collectionRoot = path.join(targetRoot, collectionRelPath);
   const walk: WalkResult = await walkCollection(collectionRoot);
+
+  // Refuse if any subtree is unreadable. Continuing would let the
+  // last_seen_run cleanup at end-of-scan delete the rows of files we
+  // couldn't see — silently forgetting them. Caller (orchestrator) gets a
+  // structured error so the user can fix permissions and re-scan.
+  const unreadable = walk.errors
+    .filter((e) => e.kind === 'unreadable')
+    .map((e) => e.absPath);
+  if (unreadable.length > 0) {
+    throw new UnreadableSubtreeError(
+      `cannot scan collection "${collectionRelPath}": ${unreadable.length} unreadable ` +
+        `subtree(s) — fix permissions and re-scan. Affected: ${unreadable
+          .slice(0, 5)
+          .join(', ')}${unreadable.length > 5 ? '…' : ''}`,
+      unreadable,
+      collectionRelPath,
+    );
+  }
 
   opts.onProgress?.({
     type: 'discovered',

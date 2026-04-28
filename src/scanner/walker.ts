@@ -17,10 +17,24 @@ export interface WalkedDir {
   empty: boolean;
 }
 
+export interface WalkError {
+  absPath: string;
+  message: string;
+  /**
+   * Tagged 'unreadable' for permission-style failures the orchestrator must
+   * treat as fatal: a single EACCES on a directory means fast-glob silently
+   * dropped its entire subtree, and continuing the scan would let
+   * deleteStaleFiles() forget previously-indexed rows under that dir.
+   *
+   * 'depth_warning' is informational only — the walk continues normally.
+   */
+  kind: 'unreadable' | 'depth_warning';
+}
+
 export interface WalkResult {
   files: WalkedFile[];
   emptyDirs: WalkedDir[];
-  errors: Array<{ absPath: string; message: string }>;
+  errors: WalkError[];
   rejectedSymlinks: string[];
   maxDepthSeen: number;
 }
@@ -54,6 +68,13 @@ export async function walkCollection(collectionRoot: string): Promise<WalkResult
   };
 
   if (!fs.existsSync(collectionRoot)) return result;
+
+  // 0. Detect any unreadable subtree BEFORE we trust fast-glob's output.
+  // fast-glob with suppressErrors:true silently drops subtrees on EACCES /
+  // EPERM, which would let deleteStaleFiles() clear the rows for those
+  // files in the DB. The orchestrator is expected to refuse the scan when
+  // any 'unreadable' error is reported here.
+  collectUnreadableDirs(collectionRoot, '', result);
 
   // 1. Walk files via fast-glob with stats. Symlinks are NOT followed.
   const fileEntries = await fg('**/*', {
@@ -90,6 +111,7 @@ export async function walkCollection(collectionRoot: string): Promise<WalkResult
     result.errors.push({
       absPath: collectionRoot,
       message: `tree contains paths >= ${DEPTH_WARN} segments deep (warning)`,
+      kind: 'depth_warning',
     });
   }
 
@@ -133,6 +155,7 @@ export async function walkCollection(collectionRoot: string): Promise<WalkResult
       result.errors.push({
         absPath: abs,
         message: err instanceof Error ? err.message : String(err),
+        kind: 'unreadable',
       });
       continue;
     }
@@ -148,4 +171,53 @@ export async function walkCollection(collectionRoot: string): Promise<WalkResult
   }
 
   return result;
+}
+
+/**
+ * Synchronous BFS over directories under `collectionRoot`, used purely to
+ * surface subtrees we don't have permission to read. fast-glob is what
+ * actually populates result.files; this pass exists ONLY to detect EACCES /
+ * EPERM that fast-glob silently swallows.
+ *
+ * Why sync: this runs inline on the walker thread, the volume is local,
+ * and the cost is one extra readdir per directory which is negligible
+ * compared to fast-glob's own traversal. Mixing it into fast-glob via
+ * stream events would require turning suppressErrors off and handling
+ * spurious ENOENTs on files races, which is more error-prone than a
+ * dedicated pass.
+ */
+function collectUnreadableDirs(
+  collectionRoot: string,
+  relSoFar: string,
+  result: WalkResult,
+): void {
+  const queue: Array<{ abs: string; rel: string }> = [
+    { abs: collectionRoot, rel: relSoFar },
+  ];
+  while (queue.length > 0) {
+    const cur = queue.shift();
+    if (!cur) break;
+    let entries: fs.Dirent[];
+    try {
+      entries = fs.readdirSync(cur.abs, { withFileTypes: true });
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code;
+      if (code === 'EACCES' || code === 'EPERM') {
+        result.errors.push({
+          absPath: cur.abs,
+          message: `cannot read directory (${code}): ${cur.abs}`,
+          kind: 'unreadable',
+        });
+      }
+      // ENOENT (file disappeared mid-walk) and friends: skip silently —
+      // fast-glob's behavior is the same and there's nothing actionable.
+      continue;
+    }
+    for (const e of entries) {
+      if (e.isSymbolicLink()) continue; // never follow
+      if (!e.isDirectory()) continue;
+      const childAbs = path.join(cur.abs, e.name);
+      queue.push({ abs: childAbs, rel: cur.rel ? `${cur.rel}/${e.name}` : e.name });
+    }
+  }
 }
