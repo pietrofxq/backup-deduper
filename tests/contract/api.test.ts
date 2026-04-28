@@ -1,24 +1,44 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { makeTmpDir, rmRf, buildTree } from '../_helpers/tmp.js';
 import { boot } from '../../src/main.js';
-import { openDb } from '../../src/db/index.js';
+import { openDb, type Db } from '../../src/db/index.js';
 import { buildServer } from '../../src/server/index.js';
 import type { FastifyInstance } from 'fastify';
 
 let root: string;
 let app: FastifyInstance;
+let dbHandle: Db | null = null;
 
 async function setup(files: Record<string, string>) {
   root = makeTmpDir('api-');
   buildTree(root, files);
   await boot({ targetRoot: root, noServe: true });
   const db = openDb(root);
+  dbHandle = db;
   app = await buildServer({ db, targetRoot: root, port: 0, dontListen: true });
   return db;
 }
 
 afterEach(async () => {
+  // Order matters on Windows: stop the Fastify app first (no more requests
+  // can land on the DB), then close the DB connection, only then rm the
+  // tree. better-sqlite3 holds an open handle on `state.db`; on Windows
+  // that handle blocks `unlink` with EBUSY until the connection closes.
   if (app) await app.close();
+  if (dbHandle) {
+    try {
+      // Force-truncate the WAL so the -wal/-shm files are released too.
+      dbHandle.client.pragma('wal_checkpoint(TRUNCATE)');
+    } catch {
+      /* connection may already be closed; ignore */
+    }
+    try {
+      dbHandle.client.close();
+    } catch {
+      /* ignore double-close */
+    }
+    dbHandle = null;
+  }
   rmRf(root);
 });
 
