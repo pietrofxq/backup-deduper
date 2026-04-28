@@ -6,6 +6,7 @@ import { loadConfig, saveConfig } from '../config/loader.js';
 import { CONFIRMATION_PHRASE } from '../config/schema.js';
 import { checkSanityGuard, type SanityGuardResult } from './sanityGuard.js';
 import { appendAudit } from '../audit/log.js';
+import { parseSqliteDatetime } from '../db/datetime.js';
 
 export class DryRunGateError extends Error {
   constructor(message: string) {
@@ -64,7 +65,7 @@ export function runQuarantineJob(input: QuarantineJobInput): QuarantineJobResult
 
   const scanRun = getRun(db, scanRunId);
   const runStartedAtIso = scanRun?.started_at
-    ? new Date(scanRun.started_at + 'Z').toISOString()
+    ? parseSqliteDatetime(scanRun.started_at).toISOString()
     : new Date().toISOString();
 
   const runId = createRun(db, 'quarantine', false, {

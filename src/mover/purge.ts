@@ -12,6 +12,7 @@ import { sentinelPaths } from '../target/sentinel.js';
 import { toLongPath } from '../paths/winLong.js';
 import { isPathWithin } from '../paths/relpath.js';
 import { appendAudit } from '../audit/log.js';
+import { parseSqliteDatetime } from '../db/datetime.js';
 
 export interface PurgeOptions {
   db: Db;
@@ -129,9 +130,7 @@ export function purge(opts: PurgeOptions): PurgeSummary {
 
 function isOldEnough(a: QuarantineActionRow, cutoff: Date): boolean {
   if (!a.executed_at) return false;
-  // SQLite default datetime is UTC; treat as such.
-  const t = new Date(a.executed_at + 'Z');
-  return t.getTime() <= cutoff.getTime();
+  return parseSqliteDatetime(a.executed_at).getTime() <= cutoff.getTime();
 }
 
 /** Remove empty subdirectories under trashDir bottom-up. Returns the count removed. */
