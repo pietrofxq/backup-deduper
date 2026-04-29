@@ -1,0 +1,11 @@
+node_modules/
+dist/
+web/dist/
+*.log
+.dedupe/
+.dedupe-trash/
+.tmp/
+coverage/
+.vite/
+.codex
+.claude
