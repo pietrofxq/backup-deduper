@@ -569,8 +569,9 @@ export function setReviewItemStatus(
   db: Db,
   id: number,
   status: ReviewItemRow['status'],
-): void {
-  db.q.update(s.reviewItem).set({ status }).where(eq(s.reviewItem.id, id)).run();
+): boolean {
+  const result = db.q.update(s.reviewItem).set({ status }).where(eq(s.reviewItem.id, id)).run();
+  return result.changes > 0;
 }
 
 // ---------- config ----------

@@ -24,6 +24,7 @@ const DecisionBody = z.object({
 const Params = z.object({ id: z.coerce.number().int().positive() });
 
 const Ok = z.object({ ok: z.literal(true) });
+const NotFound = z.object({ error: z.string() });
 
 export async function registerReviewRoutes(app: ZodApp, deps: ServerDeps): Promise<void> {
   app.get(
@@ -38,11 +39,12 @@ export async function registerReviewRoutes(app: ZodApp, deps: ServerDeps): Promi
       schema: {
         params: Params,
         body: DecisionBody,
-        response: { 200: Ok },
+        response: { 200: Ok, 404: NotFound },
       },
     },
-    async (req) => {
-      setReviewItemStatus(deps.db, req.params.id, req.body.status);
+    async (req, reply) => {
+      const updated = setReviewItemStatus(deps.db, req.params.id, req.body.status);
+      if (!updated) return reply.code(404).send({ error: 'review_item_not_found' });
       return { ok: true as const };
     },
   );

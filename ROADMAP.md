@@ -154,6 +154,16 @@ These are the non-blocking items the M7 hardening pass surfaced. Tagged with the
 | 17 | `src/mover/purge.ts:74` | Use `fs.realpathSync` to defend against symlinks inside trash | M11 |
 | 18 | `src/db/index.ts:18-21` | Document that `db.q` is canonical; `db.client` is escape hatch | M11 |
 | 20 | `src/db/queries.ts` | One-second `executed_at` precision; switch to `strftime('%Y-%m-%dT%H:%M:%fZ', 'now')` | M11 |
+| 21 | `src/orchestrator/runStore.ts` | Scan results held only in memory — lost on server restart; persist to DB or JSON sidecar | M9 |
+| 22 | `src/db/queries.ts:458` | `listAllActions` capped at 1000 rows with no pagination; `/audit` silently truncates | M10 |
+| 23 | `src/server/routes/*.ts` | Missing response schemas on ~8 routes; internal DB column names could leak, no OpenAPI generation | M8 |
+| 24 | `src/server/routes/scans.ts:77` | `POST /quarantine/run` registered in `scans.ts` — move to `quarantine.ts` | M8 |
+| 25 | `src/mover/quarantine.ts:143` | Cruft files with null hashes skip re-verification entirely (TOCTOU risk) — document as known limitation | M11 |
+| 26 | `src/scanner/index.ts:72` | `discoverCollections` skips dot-prefixed directories unconditionally — undocumented | M9 |
+| 27 | `src/classifier/nameCollision.ts:36-48` | O(n²) per basename group — cap or warn for large groups | M11 |
+| 28 | `src/server/index.ts` | No CORS config — needed when Vite dev server lands on a different port | M8 |
+| 29 | `src/mover/quarantine.ts` | No in-process mutex for destructive operations; concurrent requests could race | M11 |
+| 30 | `tests/` | Missing tests: `isPathWithin` guard in quarantine, empty-dir fence, `uniqueDest` overflow (10k collisions) | M11 |
 
 ---
 

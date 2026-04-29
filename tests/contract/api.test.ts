@@ -142,6 +142,18 @@ describe('API — health & config', () => {
     db.client.close();
   });
 
+  it('POST /review/:id/decision returns 404 for nonexistent id', async () => {
+    const db = await setup({ 'A/x.txt': 'a' });
+    const r = await app.inject({
+      method: 'POST',
+      url: '/review/999999/decision',
+      payload: { status: 'kept_both' },
+    });
+    expect(r.statusCode).toBe(404);
+    expect(JSON.parse(r.body).error).toBe('review_item_not_found');
+    db.client.close();
+  });
+
   it('POST /config/disable-dry-run requires the exact phrase', async () => {
     await setup({ 'A/x.txt': 'a' });
     const r = await app.inject({
