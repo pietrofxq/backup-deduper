@@ -33,15 +33,22 @@ export async function registerStaticUi(app: ZodApp): Promise<void> {
     // here repeatedly, and a synchronous readFile per request would block
     // the event loop. The bundle's index.html only changes when the user
     // re-runs `npm run build:web` and restarts the server, so caching is
-    // safe.
-    const indexHtml = fs.readFileSync(path.join(distDir, 'index.html'));
+    // safe. Read as a string (utf-8); the explicit charset on the
+    // response header below is the wire-shape contract — Fastify will
+    // NOT auto-amend an explicit `reply.type('text/html')`, so we must
+    // include the charset ourselves. The HTML's `<meta charset>` tag is
+    // belt-and-braces.
+    const indexHtml = fs.readFileSync(path.join(distDir, 'index.html'), 'utf-8');
     app.setNotFoundHandler((req, reply) => {
-      // Anything under /api/* that 404s is a real 404 — surface as JSON so
-      // the SPA's apiClient sees a structured error, not a chunk of HTML.
-      if (req.url.startsWith('/api/')) {
+      // Anything under /api or /api/* that 404s is a real 404 — surface
+      // as JSON so the SPA's apiClient sees a structured error, not a
+      // chunk of HTML. Match the bare `/api` (with or without query
+      // string) too so the wire shape is uniform.
+      const pathOnly = req.url.split('?', 1)[0] ?? req.url;
+      if (pathOnly === '/api' || pathOnly.startsWith('/api/')) {
         return reply.code(404).send({ error: 'not_found' });
       }
-      return reply.type('text/html').send(indexHtml);
+      return reply.type('text/html; charset=utf-8').send(indexHtml);
     });
     return;
   }

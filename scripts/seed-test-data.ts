@@ -129,13 +129,42 @@ function assertSafeTarget(target: string): void {
   // real data. The cwd allowlist matches the documented workflow
   // (`npm run seed -- ./.test-data`); tmpdir is the escape hatch for
   // ad-hoc scripting.
-  const cwd = path.resolve(process.cwd());
-  const tmp = path.resolve(os.tmpdir());
-  if (!isWithin(cwd, abs) && !isWithin(tmp, abs)) {
+  //
+  // CRITICAL: do the comparison on REALPATH'd paths. `path.resolve` is
+  // syntactic and ignores symlinks. Without this, a user who creates
+  // `./escape -> /` inside cwd could pass `./escape/etc --clean` and
+  // `fs.rmSync` would follow the link and delete /etc (the fence happily
+  // accepts the syntactic resolution `<cwd>/escape/etc`). Realpath'ing
+  // both sides also handles macOS where `/tmp` is a symlink to
+  // `/private/tmp` — without it, every legitimate tmpdir path would fail
+  // the fence.
+  const realCwd = fs.realpathSync(process.cwd());
+  const realTmp = fs.realpathSync(os.tmpdir());
+  const realTarget = realpathOrAncestor(abs);
+  if (!isWithin(realCwd, realTarget) && !isWithin(realTmp, realTarget)) {
     die(
-      `refusing to seed at ${abs} — must be inside cwd (${cwd}) or tmpdir (${tmp})`,
+      `refusing to seed at ${abs} (resolves to ${realTarget}) — must be inside cwd (${realCwd}) or tmpdir (${realTmp})`,
     );
   }
+}
+
+/**
+ * Realpath the deepest existing ancestor of `p`, then re-attach the
+ * not-yet-existing tail. We can't `realpathSync(p)` directly because the
+ * target may not exist on first run (the script creates it).
+ *
+ * The non-existing tail can't itself be a symlink (the OS hasn't created
+ * it yet), so syntactic concatenation is sound for the suffix.
+ */
+function realpathOrAncestor(p: string): string {
+  let anchor = p;
+  while (!fs.existsSync(anchor)) {
+    const parent = path.dirname(anchor);
+    if (parent === anchor) return anchor; // reached root
+    anchor = parent;
+  }
+  const tail = path.relative(anchor, p);
+  return tail === '' ? fs.realpathSync(anchor) : path.join(fs.realpathSync(anchor), tail);
 }
 
 /**

@@ -366,6 +366,26 @@ describe('API — SPA fallback', () => {
     const body = JSON.parse(r.body);
     expect(body.error).toBeDefined();
   });
+
+  it('bare /api (no trailing slash, with or without query) returns JSON 404', async () => {
+    // `req.url.startsWith('/api/')` alone would let `/api` and `/api?x=1`
+    // fall through to the HTML fallback — wire-shape inconsistency.
+    await setup({ 'A/x.txt': 'a' });
+    for (const url of ['/api', '/api?probe=1']) {
+      const r = await app.inject({ method: 'GET', url });
+      expect(r.statusCode, `URL ${url}`).toBe(404);
+      // Robust check: the body MUST parse as JSON, regardless of fallback state.
+      const body = JSON.parse(r.body);
+      expect(body.error, `URL ${url}`).toBeDefined();
+    }
+  });
+
+  it('SPA fallback emits text/html with charset=utf-8 (when web/dist is built)', async () => {
+    await setup({ 'A/x.txt': 'a' });
+    const r = await app.inject({ method: 'GET', url: '/settings' });
+    if (r.statusCode === 404) return; // no web/dist — skip
+    expect(r.headers['content-type']).toMatch(/text\/html.*charset=utf-?8/i);
+  });
 });
 
 describe('API — review queue', () => {
