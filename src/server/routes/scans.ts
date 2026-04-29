@@ -35,7 +35,7 @@ export async function registerScanRoutes(app: ZodApp, deps: ServerDeps): Promise
     async (req, reply) => {
       const run = getRun(deps.db, req.params.id);
       if (!run) {
-        return reply.code(404).send({ error: 'not found' });
+        return reply.code(404).send({ error: 'scan_run_not_found' });
       }
       const cached = getScanResult(req.params.id);
       return { run, report: cached?.report ?? null };
