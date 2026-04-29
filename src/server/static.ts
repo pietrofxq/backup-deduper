@@ -28,14 +28,20 @@ export async function registerStaticUi(app: ZodApp): Promise<void> {
       root: distDir,
       prefix: '/',
     });
-    const indexPath = path.join(distDir, 'index.html');
+    // Read index.html ONCE at registration. The not-found handler is a hot
+    // path — deep links, random probes, or a misconfigured client can land
+    // here repeatedly, and a synchronous readFile per request would block
+    // the event loop. The bundle's index.html only changes when the user
+    // re-runs `npm run build:web` and restarts the server, so caching is
+    // safe.
+    const indexHtml = fs.readFileSync(path.join(distDir, 'index.html'));
     app.setNotFoundHandler((req, reply) => {
       // Anything under /api/* that 404s is a real 404 — surface as JSON so
       // the SPA's apiClient sees a structured error, not a chunk of HTML.
       if (req.url.startsWith('/api/')) {
         return reply.code(404).send({ error: 'not_found' });
       }
-      return reply.type('text/html').send(fs.readFileSync(indexPath));
+      return reply.type('text/html').send(indexHtml);
     });
     return;
   }

@@ -46,13 +46,16 @@ export function createApiClient(opts: ApiClientOptions = {}) {
     body?: unknown,
     query?: Record<string, string | number | boolean | undefined>,
   ): Promise<T> {
-    const search = query
-      ? '?' +
-        Object.entries(query)
-          .filter(([, v]) => v !== undefined)
-          .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(String(v))}`)
-          .join('&')
-      : '';
+    const queryEntries = query
+      ? Object.entries(query).filter(([, v]) => v !== undefined)
+      : [];
+    const search =
+      queryEntries.length > 0
+        ? '?' +
+          queryEntries
+            .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(String(v))}`)
+            .join('&')
+        : '';
     const url = `${baseUrl}/api${path}${search}`;
     const res = await f(url, {
       method,

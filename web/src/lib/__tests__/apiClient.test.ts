@@ -79,7 +79,7 @@ describe('apiClient', () => {
     const { fetch, calls } = makeFetchStub(() => ({ body: [] }));
     const api = createApiClient({ fetch });
     await api.listQuarantine();
-    expect(calls[0]?.url).toBe('/api/quarantine?');
+    expect(calls[0]?.url).toBe('/api/quarantine');
   });
 
   it('non-2xx response throws ApiError with parsed body', async () => {

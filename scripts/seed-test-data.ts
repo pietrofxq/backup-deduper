@@ -32,7 +32,11 @@
  * Safety:
  *   - Refuses to write to a path that already contains `.dedupe/` unless
  *     `--clean` is passed (we don't want to corrupt a real dedupe state DB).
- *   - Refuses to operate on `/`, `$HOME`, or paths above the project tree.
+ *   - Refuses to operate on `/`, `$HOME`, the parent of `$HOME`, or common
+ *     POSIX system paths.
+ *   - Requires the resolved target to be a descendant of either the
+ *     current working directory or the OS tmp dir. Anywhere else is too
+ *     easy to nuke a real backup with `--clean`.
  *   - All file content is deterministic — re-running the script produces
  *     byte-identical files, so the cache layer can be tested by running
  *     a scan, then re-seeding, then re-scanning.
@@ -103,7 +107,7 @@ function die(msg: string): never {
 
 function assertSafeTarget(target: string): void {
   const abs = path.resolve(target);
-  // Disallow root, $HOME, parent of project. Belt and braces — the script
+  // Disallow root, $HOME, parent of $HOME. Belt and braces — the script
   // can rm -rf when --clean is passed.
   const forbidden = new Set([
     path.parse(abs).root,
@@ -120,6 +124,28 @@ function assertSafeTarget(target: string): void {
       die(`refusing to seed at system path ${abs}`);
     }
   }
+  // Require the target to live under cwd or the tmp dir. Without this an
+  // accidental `npm run seed -- ~/Backups/Phone --clean` would happily wipe
+  // real data. The cwd allowlist matches the documented workflow
+  // (`npm run seed -- ./.test-data`); tmpdir is the escape hatch for
+  // ad-hoc scripting.
+  const cwd = path.resolve(process.cwd());
+  const tmp = path.resolve(os.tmpdir());
+  if (!isWithin(cwd, abs) && !isWithin(tmp, abs)) {
+    die(
+      `refusing to seed at ${abs} — must be inside cwd (${cwd}) or tmpdir (${tmp})`,
+    );
+  }
+}
+
+/**
+ * Mirror of `src/paths/relpath.ts:isPathWithin` — case-insensitive on
+ * Windows via `path.relative`. Kept inline so the script has no
+ * project-internal imports (it runs via `tsx` before the build).
+ */
+function isWithin(parent: string, child: string): boolean {
+  const rel = path.relative(parent, child);
+  return rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel));
 }
 
 function assertNoExistingDedupeState(target: string, clean: boolean): void {
