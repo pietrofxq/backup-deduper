@@ -173,6 +173,16 @@ export function executeQuarantine(
       action.file.rel_path,
     );
     const destAbs = uniqueDest(desiredDest);
+    const { trashDir } = sentinelPaths(targetRoot);
+    if (!isPathWithin(trashDir, path.resolve(destAbs))) {
+      appendAudit(targetRoot, 'quarantine_skip', {
+        reason: 'dest_outside_trash',
+        destAbs,
+        srcAbs,
+      });
+      summary.errored += 1;
+      continue;
+    }
     fs.mkdirSync(path.dirname(destAbs), { recursive: true });
 
     const actionId = insertPlannedAction(db, {

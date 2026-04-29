@@ -12,8 +12,9 @@ import {
 import type { Db } from '../db/index.js';
 import { appendAudit } from '../audit/log.js';
 import { hashFileSync } from '../hasher/sha256.js';
-import { fromDbRelPath } from '../paths/relpath.js';
+import { fromDbRelPath, isPathWithin } from '../paths/relpath.js';
 import { toLongPath } from '../paths/winLong.js';
+import { sentinelPaths } from '../target/sentinel.js';
 
 /**
  * Startup reconciliation.
@@ -63,7 +64,19 @@ export function reconcilePending(db: Db, targetRoot: string): ReconcileSummary {
   const collectionsById = new Map<number, CollectionRow>();
   for (const c of listCollections(db)) collectionsById.set(c.id, c);
 
+  const { trashDir } = sentinelPaths(targetRoot);
+
   for (const action of getPendingActions(db)) {
+    if (!isPathWithin(trashDir, path.resolve(action.dest_abs_path))) {
+      markActionError(db, action.id, `reconcile: dest_abs_path outside .dedupe-trash (${action.dest_abs_path})`);
+      appendAudit(targetRoot, 'reconcile_error', {
+        actionId: action.id,
+        reason: 'dest_outside_trash',
+        destAbsPath: action.dest_abs_path,
+      });
+      pendingActionsErrored += 1;
+      continue;
+    }
     const destStat = safeStatLeaf(action.dest_abs_path);
 
     if (destStat) {
