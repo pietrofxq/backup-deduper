@@ -41,45 +41,59 @@ export async function boot(opts: BootOptions): Promise<BootResult> {
   fs.mkdirSync(trashDir, { recursive: true });
 
   const db = openDb(targetRoot);
-  migrate(db);
-  seedBuiltinPresets(db);
+  // The DB handle has to be closed on every exit path that doesn't hand it
+  // to the server. Wrap the post-open work in try/catch so a thrown error
+  // from migrate, seed, guard, reconcile, or startServer doesn't leak the
+  // handle — on Windows the open fd blocks subsequent test runs from
+  // removing the .dedupe folder, and in production it leaks an fd per
+  // crashed boot until the process exits.
+  try {
+    migrate(db);
+    seedBuiltinPresets(db);
 
-  const dbTarget = getTarget(db);
-  const guardResult = runTargetGuard(
-    targetRoot,
-    osPlatform,
-    {
-      getDbUuid: () => dbTarget?.target_id_uuid ?? null,
-      bindDbUuid: (uuid, root, plat) => setTarget(db, uuid, root, plat),
-      updateTargetRoot: (root) => updateTargetRoot(db, root),
-    },
-    dbTarget?.target_root_abs ?? null,
-  );
+    const dbTarget = getTarget(db);
+    const guardResult = runTargetGuard(
+      targetRoot,
+      osPlatform,
+      {
+        getDbUuid: () => dbTarget?.target_id_uuid ?? null,
+        bindDbUuid: (uuid, root, plat) => setTarget(db, uuid, root, plat),
+        updateTargetRoot: (root) => updateTargetRoot(db, root),
+      },
+      dbTarget?.target_root_abs ?? null,
+    );
 
-  appendAudit(targetRoot, 'boot', {
-    uuid: guardResult.uuid,
-    initialized: guardResult.initialized,
-    remounted: guardResult.remounted,
-    targetRoot,
-    osPlatform,
-  });
+    appendAudit(targetRoot, 'boot', {
+      uuid: guardResult.uuid,
+      initialized: guardResult.initialized,
+      remounted: guardResult.remounted,
+      targetRoot,
+      osPlatform,
+    });
 
-  // Reconcile any actions left in mid-flight from a previous crash.
-  reconcilePending(db, targetRoot);
+    // Reconcile any actions left in mid-flight from a previous crash.
+    reconcilePending(db, targetRoot);
 
-  // Touch loaded config to materialize defaults.
-  loadConfig(db);
+    // Touch loaded config to materialize defaults.
+    loadConfig(db);
 
-  if (opts.noServe) {
-    // Important: in noServe mode the caller (typically a test) does not get
-    // the DB handle, so close it here. Holding it open leaks an fd and on
-    // Windows blocks subsequent test runs from removing the .dedupe folder.
-    db.client.close();
-    return { targetRoot, uuid: guardResult.uuid, port: 0 };
+    if (opts.noServe) {
+      // The caller (typically a test) does not get the DB handle, so close it
+      // here on the success path.
+      db.client.close();
+      return { targetRoot, uuid: guardResult.uuid, port: 0 };
+    }
+    const port = opts.port ?? Number(process.env.PORT ?? 7777);
+    const server = await startServer({ db, targetRoot, port });
+    return { targetRoot, uuid: guardResult.uuid, port: server.port };
+  } catch (err) {
+    try {
+      db.client.close();
+    } catch {
+      /* connection may already be closed; ignore */
+    }
+    throw err;
   }
-  const port = opts.port ?? Number(process.env.PORT ?? 7777);
-  const server = await startServer({ db, targetRoot, port });
-  return { targetRoot, uuid: guardResult.uuid, port: server.port };
 }
 
 // CLI entrypoint

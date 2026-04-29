@@ -2,6 +2,7 @@ import { z } from 'zod';
 import type { ServerDeps } from '../index.js';
 import type { ZodApp } from '../types.js';
 import { listReviewItems, setReviewItemStatus } from '../../db/queries.js';
+import { ReviewItemRow } from '../schemas.js';
 
 const ReviewStatus = z.enum(['open', 'kept_both', 'quarantined_a', 'quarantined_b']);
 
@@ -29,7 +30,12 @@ const NotFound = z.object({ error: z.string() });
 export async function registerReviewRoutes(app: ZodApp, deps: ServerDeps): Promise<void> {
   app.get(
     '/review',
-    { schema: { querystring: ListQuery } },
+    {
+      schema: {
+        querystring: ListQuery,
+        response: { 200: z.array(ReviewItemRow) },
+      },
+    },
     async (req) => listReviewItems(deps.db, req.query.status),
   );
 

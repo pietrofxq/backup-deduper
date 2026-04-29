@@ -5,6 +5,8 @@ web/dist/
 .dedupe/
 .dedupe-trash/
 .tmp/
+.test-data/
+*.tsbuildinfo
 coverage/
 .vite/
 .codex
