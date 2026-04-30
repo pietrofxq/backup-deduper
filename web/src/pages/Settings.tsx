@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useId, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { CheckCircle2, Lock, ShieldOff, Star } from 'lucide-react';
 import { ApiError, type Config } from '../lib/apiClient.js';
@@ -294,13 +294,20 @@ function Slider({
   value: number;
   onChange: (n: number) => void;
 }) {
+  const inputId = useId();
   return (
     <div className="space-y-1.5">
       <div className="flex items-baseline justify-between">
-        <label className="text-xs font-medium text-(--color-text-muted)">{label}</label>
+        <label
+          htmlFor={inputId}
+          className="text-xs font-medium text-(--color-text-muted)"
+        >
+          {label}
+        </label>
         <span className="text-sm font-semibold tabular-nums">{formatPercent(value)}</span>
       </div>
       <input
+        id={inputId}
         type="range"
         min={0}
         max={1}

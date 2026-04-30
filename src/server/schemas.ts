@@ -7,7 +7,7 @@ import { z } from 'zod';
  *
  * When extending a row type with a new column, add it here too — Fastify's
  * `serializerCompiler` strips fields not declared in the response schema, so
- * forgetting one will silently 0-out the wire shape.
+ * forgetting one will silently drop the field from the wire response.
  */
 
 export const ErrorResponse = z.object({ error: z.string() });

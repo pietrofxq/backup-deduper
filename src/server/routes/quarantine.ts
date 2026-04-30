@@ -76,7 +76,7 @@ export async function registerQuarantineRoutes(
       if (!cached) {
         return reply.code(404).send({
           error:
-            'scan result not found in cache; re-run /scans first (server restarts clear the cache)',
+            'scan result not found in cache; re-run /api/scans first (server restarts clear the cache)',
         });
       }
       try {
