@@ -4,34 +4,40 @@ import type { ZodApp } from '../types.js';
 import { runScanJob } from '../../orchestrator/scanJob.js';
 import { getScanResult, rememberScan } from '../../orchestrator/runStore.js';
 import { getRun, listRuns } from '../../db/queries.js';
-import {
-  DryRunGateError,
-  runQuarantineJob,
-  SanityGuardError,
-} from '../../orchestrator/quarantineJob.js';
+import { DryRunGateError } from '../../orchestrator/quarantineJob.js';
 import { UnreadableSubtreeError } from '../../scanner/index.js';
 import { UnknownPresetError } from '../../presets/registry.js';
+import {
+  DryRunReport,
+  ErrorResponse,
+  RunRow,
+  ScanDetailResponse,
+  ScanGateError,
+  ScanStartResponse,
+} from '../schemas.js';
 
 const StartScanBody = z.object({
   presetName: z.string().optional(),
   dryRun: z.boolean().optional(),
 });
 
-const RunQuarantineBody = z.object({
-  scanRunId: z.number().int().positive(),
-  ignoreSanityGuard: z.boolean().optional(),
-});
-
 const Params = z.object({ id: z.coerce.number().int().positive() });
 
-const ErrorResponse = z.object({ error: z.string() });
-
 export async function registerScanRoutes(app: ZodApp, deps: ServerDeps): Promise<void> {
-  app.get('/scans', async () => listRuns(deps.db, 50));
+  app.get(
+    '/scans',
+    { schema: { response: { 200: z.array(RunRow) } } },
+    async () => listRuns(deps.db, 50),
+  );
 
   app.get(
     '/scans/:id',
-    { schema: { params: Params } },
+    {
+      schema: {
+        params: Params,
+        response: { 200: ScanDetailResponse, 404: ErrorResponse },
+      },
+    },
     async (req, reply) => {
       const run = getRun(deps.db, req.params.id);
       if (!run) {
@@ -44,7 +50,17 @@ export async function registerScanRoutes(app: ZodApp, deps: ServerDeps): Promise
 
   app.post(
     '/scans',
-    { schema: { body: StartScanBody.optional() } },
+    {
+      schema: {
+        body: StartScanBody.optional(),
+        response: {
+          200: ScanStartResponse,
+          400: ScanGateError,
+          404: ScanGateError,
+          409: ScanGateError,
+        },
+      },
+    },
     async (req, reply) => {
       try {
         const result = await runScanJob(deps.db, deps.targetRoot, req.body ?? {});
@@ -62,7 +78,9 @@ export async function registerScanRoutes(app: ZodApp, deps: ServerDeps): Promise
           return reply.code(409).send({
             error: err.message,
             kind: 'unreadable_subtree',
-            unreadablePaths: err.unreadablePaths,
+            // Spread to a fresh mutable array so the response schema's
+            // `array(string)` doesn't reject ReadonlyArray.
+            unreadablePaths: [...err.unreadablePaths],
             collectionRelPath: err.collectionRelPath,
           });
         }
@@ -73,40 +91,7 @@ export async function registerScanRoutes(app: ZodApp, deps: ServerDeps): Promise
       }
     },
   );
-
-  app.post(
-    '/quarantine/run',
-    { schema: { body: RunQuarantineBody } },
-    async (req, reply) => {
-      const cached = getScanResult(req.body.scanRunId);
-      if (!cached) {
-        return reply
-          .code(404)
-          .send({
-            error:
-              'scan result not found in cache; re-run /scans first (server restarts clear the cache)',
-          });
-      }
-      try {
-        return runQuarantineJob({
-          db: deps.db,
-          targetRoot: deps.targetRoot,
-          scanRunId: req.body.scanRunId,
-          actions: cached.actions,
-          emptyDirs: cached.emptyDirActions,
-          ignoreSanityGuard: req.body.ignoreSanityGuard ?? false,
-        });
-      } catch (err) {
-        if (err instanceof DryRunGateError) {
-          return reply.code(400).send({ error: err.message, kind: 'dry_run_gate' });
-        }
-        if (err instanceof SanityGuardError) {
-          return reply
-            .code(400)
-            .send({ error: err.message, kind: 'sanity_guard', guard: err.guard });
-        }
-        throw err;
-      }
-    },
-  );
 }
+
+// Re-export so callers building the report shape can keep their imports stable.
+export { DryRunReport };

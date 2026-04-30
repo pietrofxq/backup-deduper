@@ -5,7 +5,17 @@ import type { ZodApp } from './types.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 
-/** Locate the bundled web/dist folder if it exists; otherwise fall back to a minimal embedded UI. */
+/**
+ * Serve the bundled SPA at `/` if `web/dist/` exists, otherwise fall back
+ * to a minimal embedded HTML UI.
+ *
+ * The SPA uses client-side routing (TanStack Router); a hard refresh on
+ * `/settings` arrives at Fastify, not at index.html. We register a
+ * NOT_FOUND handler that returns index.html for any non-`/api/*` path so
+ * the client router can take over. `/api/*` is unaffected — Fastify only
+ * falls through to `setNotFoundHandler` when no route matched, and the
+ * API plugin owns every `/api/*` URL.
+ */
 export async function registerStaticUi(app: ZodApp): Promise<void> {
   const distCandidates = [
     path.resolve(HERE, '../../web/dist'),
@@ -17,6 +27,28 @@ export async function registerStaticUi(app: ZodApp): Promise<void> {
     await app.register(fastifyStatic.default, {
       root: distDir,
       prefix: '/',
+    });
+    // Read index.html ONCE at registration. The not-found handler is a hot
+    // path — deep links, random probes, or a misconfigured client can land
+    // here repeatedly, and a synchronous readFile per request would block
+    // the event loop. The bundle's index.html only changes when the user
+    // re-runs `npm run build:web` and restarts the server, so caching is
+    // safe. Read as a string (utf-8); the explicit charset on the
+    // response header below is the wire-shape contract — Fastify will
+    // NOT auto-amend an explicit `reply.type('text/html')`, so we must
+    // include the charset ourselves. The HTML's `<meta charset>` tag is
+    // belt-and-braces.
+    const indexHtml = fs.readFileSync(path.join(distDir, 'index.html'), 'utf-8');
+    app.setNotFoundHandler((req, reply) => {
+      // Anything under /api or /api/* that 404s is a real 404 — surface
+      // as JSON so the SPA's apiClient sees a structured error, not a
+      // chunk of HTML. Match the bare `/api` (with or without query
+      // string) too so the wire shape is uniform.
+      const pathOnly = req.url.split('?', 1)[0] ?? req.url;
+      if (pathOnly === '/api' || pathOnly.startsWith('/api/')) {
+        return reply.code(404).send({ error: 'not_found' });
+      }
+      return reply.type('text/html; charset=utf-8').send(indexHtml);
     });
     return;
   }
@@ -125,9 +157,9 @@ function clear(node) { while (node.firstChild) node.removeChild(node.firstChild)
 
 async function refresh() {
   const [health, cfg, cols] = await Promise.all([
-    api('GET', '/health'),
-    api('GET', '/config'),
-    api('GET', '/collections'),
+    api('GET', '/api/health'),
+    api('GET', '/api/config'),
+    api('GET', '/api/collections'),
   ]);
   $('targetRoot').textContent = health.json?.targetRoot ?? '';
   const dry = cfg.json?.dry_run;
@@ -144,7 +176,7 @@ async function refresh() {
     const actionTd = el('td');
     const btn = el('button', { text: 'Set primary' });
     btn.onclick = async () => {
-      await api('POST', '/collections/set-primary', { collectionId: c.id });
+      await api('POST', '/api/collections/set-primary', { collectionId: c.id });
       refresh();
     };
     actionTd.appendChild(btn);
@@ -158,7 +190,7 @@ async function refresh() {
 async function refreshQ() {
   const tbody = $('quarantineTable').querySelector('tbody');
   clear(tbody);
-  const r = await api('GET', '/quarantine');
+  const r = await api('GET', '/api/quarantine');
   for (const a of r.json ?? []) {
     const tr = el('tr');
     tr.appendChild(td(a.id));
@@ -169,7 +201,7 @@ async function refreshQ() {
     const actionTd = el('td');
     const btn = el('button', { text: 'Restore' });
     btn.onclick = async () => {
-      await api('POST', '/quarantine/restore', { actionIds: [a.id] });
+      await api('POST', '/api/quarantine/restore', { actionIds: [a.id] });
       refreshQ();
     };
     actionTd.appendChild(btn);
@@ -181,7 +213,7 @@ async function refreshQ() {
 async function refreshReview() {
   const tbody = $('reviewTable').querySelector('tbody');
   clear(tbody);
-  const r = await api('GET', '/review?status=open');
+  const r = await api('GET', '/api/review?status=open');
   for (const item of r.json ?? []) {
     const tr = el('tr');
     tr.appendChild(td(item.basename));
@@ -198,7 +230,7 @@ async function refreshReview() {
     const actionTd = el('td');
     const btn = el('button', { text: 'keep both' });
     btn.onclick = async () => {
-      await api('POST', '/review/' + item.id + '/decision', { status: 'kept_both' });
+      await api('POST', '/api/review/' + item.id + '/decision', { status: 'kept_both' });
       refreshReview();
     };
     actionTd.appendChild(btn);
@@ -233,7 +265,7 @@ function setReportBox(rep) {
 
 $('scanBtn').onclick = async () => {
   $('lastRunStatus').textContent = 'Scanning…';
-  const r = await api('POST', '/scans', {});
+  const r = await api('POST', '/api/scans', {});
   if (!r.ok) {
     const box = $('reportBox');
     clear(box);
@@ -251,14 +283,14 @@ $('scanBtn').onclick = async () => {
 $('quarantineBtn').onclick = async () => {
   if (!lastScanRunId) return;
   if (!confirm('Run quarantine for scan ' + lastScanRunId + '?')) return;
-  const r = await api('POST', '/quarantine/run', { scanRunId: lastScanRunId });
+  const r = await api('POST', '/api/quarantine/run', { scanRunId: lastScanRunId });
   $('reportBox').appendChild(el('pre', { text: JSON.stringify(r.json, null, 2) }));
   refresh();
 };
 
 $('disableBtn').onclick = async () => {
   const phrase = $('phrase').value;
-  const r = await api('POST', '/config/disable-dry-run', { phrase });
+  const r = await api('POST', '/api/config/disable-dry-run', { phrase });
   const msg = $('disableMsg');
   clear(msg);
   if (r.ok) {

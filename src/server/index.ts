@@ -1,4 +1,5 @@
 import Fastify, { type FastifyInstance } from 'fastify';
+import fastifyCors from '@fastify/cors';
 import {
   serializerCompiler,
   validatorCompiler,
@@ -6,6 +7,24 @@ import {
 } from 'fastify-type-provider-zod';
 import type { Db } from '../db/index.js';
 import { registerRoutes } from './routes/index.js';
+
+/**
+ * CORS allowlist for development. The Vite dev server runs on a different
+ * port than Fastify (5173 vs 7777 by default), so the SPA's `fetch('/api/…')`
+ * calls land cross-origin in dev. In production the SPA is served same-origin
+ * by Fastify's static plugin, so these origins never match and CORS becomes
+ * a no-op.
+ *
+ * Localhost-only by design: this is a safety-critical local tool, never meant
+ * to be reachable from the internet. Widening the allowlist would let any web
+ * page the user visits issue requests against their target_root.
+ */
+const DEV_ORIGIN_ALLOWLIST = [
+  'http://localhost:5173',
+  'http://127.0.0.1:5173',
+  'http://localhost:4173',
+  'http://127.0.0.1:4173',
+];
 
 export type { ZodTypeProvider };
 // Routes use the typed-app alias from `./types.js` (`ZodApp`). Don't add
@@ -42,6 +61,12 @@ export async function startServer(deps: ServerDeps): Promise<ServerHandle> {
   app.setValidatorCompiler(validatorCompiler);
   app.setSerializerCompiler(serializerCompiler);
   const typed = app.withTypeProvider<ZodTypeProvider>();
+
+  await typed.register(fastifyCors, {
+    origin: DEV_ORIGIN_ALLOWLIST,
+    credentials: false,
+    methods: ['GET', 'PUT', 'POST', 'DELETE', 'OPTIONS'],
+  });
 
   await registerRoutes(typed, deps);
 

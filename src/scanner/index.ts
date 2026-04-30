@@ -60,8 +60,19 @@ export type ScanProgressEvent =
 
 /**
  * Discover top-level subdirectories under target_root that look like
- * collections. Filters out the tool's own folders (.dedupe, .dedupe-trash) and
- * dot-prefixed entries.
+ * collections.
+ *
+ * Filters out:
+ *   - the tool's own folders (`.dedupe`, `.dedupe-trash`)
+ *   - **every dot-prefixed directory** (`.git`, `.cache`, `.Trash`,
+ *     macOS's `.Spotlight-V100`/`.Trashes`/`.fseventsd`, etc.)
+ *
+ * The blanket dot-prefix filter is intentional but undocumented to the
+ * end user — if someone genuinely wants to dedupe a folder named
+ * `.archive` they can rename it. The alternative (allowlisting just
+ * `.dedupe*`) would have us walking system metadata trees that are
+ * never user content; rather than face the ENOENT/EACCES storms that
+ * implies, we skip them outright. (Backlog #26.)
  */
 export function discoverCollections(targetRoot: string): string[] {
   const entries = fs.readdirSync(targetRoot, { withFileTypes: true });

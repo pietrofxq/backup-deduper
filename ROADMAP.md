@@ -79,25 +79,39 @@ The full UI promised in PLAN.md was deferred during initial implementation in fa
 
 Each UI milestone follows the same shape: scaffolding → page → wiring → tests. The API surface is already done (M6); these milestones consume it.
 
-### ⬜ M8. Web app scaffold + design system
+### ✅ M8. Web app scaffold + design system
 
-- `web/` — Vite 6 project, React 19, TypeScript with the same `strict` + `noUncheckedIndexedAccess` flags as the server.
-- `web/src/main.tsx`, `web/src/App.tsx`, router (TanStack Router or React Router — pick one and document).
-- Tailwind 4 set up with a small token palette (one accent, one warning for the dry-run banner, neutral grays). Dark mode optional.
-- TanStack Query 5 client + a tiny typed `apiClient.ts` that mirrors the Fastify routes (no schema duplication — share the zod schemas from `src/server/routes/*.ts` via a `web/api-types.ts` re-export, OR keep them duplicated and document why).
-- Vite dev server proxies `/api/*` (we'll prefix server routes with `/api/`) to Fastify on `:7777`. Fastify continues to serve `web/dist/` at `/` in production via `@fastify/static`.
-- `npm run build:web` produces a deployable bundle Fastify mounts at `/`.
-- `npm run dev` runs Fastify (tsx) and Vite concurrently.
-- **Server-side change:** prefix all current routes with `/api/` so the SPA owns `/`. Update contract tests + the embedded fallback.
-- **Tests added:** unit — `apiClient.test.ts` (mocks fetch and asserts the inferred TypeScript types match the server's zod schemas at compile time). Vitest in `web/` runs with `jsdom`.
+- ✅ `web/` — Vite 6 project, React 19, TypeScript strict + `noUncheckedIndexedAccess` (matches the server's tsconfig flags).
+- 🟡 `web/src/main.tsx` + `web/src/App.tsx` shipped. Router **deferred to M9** — the M8 placeholder is a single page; TanStack Router lands when there are multiple pages to route between.
+- ✅ Tailwind 4 wired via `@tailwindcss/vite`. Tokens (`--color-accent`, `--color-warning`, `--color-danger`) declared in `web/src/index.css`. Dark mode skipped.
+- ✅ TanStack Query 5 + typed `web/src/lib/apiClient.ts`. ⛔ **Deviation:** response shapes are duplicated as plain TS interfaces in `apiClient.ts` rather than imported from `src/server/schemas.ts`. Reasoning is in the file's docstring — importing zod schemas would drag server-only deps (drizzle, better-sqlite3 transitively) into the web bundle and couple the two tsconfigs. The contract test (`tests/contract/api.test.ts`) is the single source of truth for the wire shape.
+- ✅ Vite dev server proxies `/api/*` to Fastify on `:7777` (configurable via `SAFE_DEDUPE_PORT`). Fastify serves `web/dist/` at `/` via `@fastify/static@8` (bumped from 7 — required by Fastify 5).
+- ✅ `npm run build:web` → `npm --prefix web run build` (tsc -b && vite build).
+- ✅ `npm run dev` runs Fastify (tsx) and Vite concurrently via `concurrently`.
+- ✅ **Server-side change:** every API route now lives under `/api`. `registerRoutes` wraps them in a Fastify plugin with `{prefix: '/api'}`. The contract tests, the embedded fallback UI, and the apiClient all hit `/api/*`.
+- ✅ **CORS:** `@fastify/cors` registered with a localhost-only allowlist (`5173`/`4173`). Production is same-origin so CORS is a no-op there. Localhost-only by design — this tool reaches user data and must not be addressable from arbitrary web pages.
+- ✅ **Backlog items closed in this milestone:**
+  - #23 (response schemas missing) — added `src/server/schemas.ts` with response schemas for every route except the trivial `Ok`-shaped ones. Internal DB column names are now serialised through zod, not raw `JSON.stringify`.
+  - #24 (`POST /quarantine/run` registered in scans.ts) — moved to `src/server/routes/quarantine.ts` where it belongs.
+  - #28 (no CORS) — added (see above).
+- ✅ **Tests added:** `web/src/lib/__tests__/apiClient.test.ts` — 7 cases, mocks fetch, asserts the `/api/*` URL prefix, JSON content-type, query-string serialisation, error handling via `ApiError`, and `baseUrl` override. All 106 server tests still green; web tests run separately via `npm run test:web`.
+- ⬜ **Deferred to M9:** SPA-fallback for client-side routes (currently `/anything` 404s from `@fastify/static`). Not blocking M8 because the placeholder app has no router.
 
-### ⬜ M9. Dashboard + Settings pages
+### ✅ M9. Dashboard + Settings pages
 
-- **Dashboard.** Renders: target_root, sentinel UUID, primary collection name, last scan summary (counts by reason, total bytes, sanity-guard verdict), big "Scan now" button, dry-run banner that's red until disabled.
-- **Settings.** Form for: pick preset (dropdown from `/api/presets`), set retention days (number input, min 1), edit sanity-guard thresholds (sliders, both default-disabled). The dry-run toggle is its own component with the type-to-confirm dialog (M12).
-- TanStack Query manages all reads with stale-while-revalidate; mutations invalidate the right keys.
-- The dashboard's "Scan now" kicks off `POST /api/scans` and shows a result panel. Progress is a placeholder until SSE lands in M11.
-- **Tests added:** Vitest + Testing Library — `Dashboard.test.tsx` (renders mocked health + collections + last-run; clicking Scan calls the POST), `Settings.test.tsx` (preset dropdown wires to PUT /config; retention-days validation).
+- ✅ **Layout shell.** `web/src/components/Layout.tsx` ships the desktop-app-feeling chrome: fixed-width sidebar with nav + status footer (target_root, UUID prefix), 56-px top bar with dry-run/live badge and active preset, content area with a max-width gutter. Auto-dark via `prefers-color-scheme` baked into CSS tokens; tabular-nums everywhere numbers live. Lucide icons, hairline borders, focus rings.
+- ✅ **Routing.** `@tanstack/react-router` (code-based) with `/` → Dashboard and `/settings` → Settings. Pending nav items (`/quarantine`, `/audit`, `/review`) render disabled with a "soon" tag pointing at M10.
+- ✅ **Dashboard.** Stat tiles (collections, files-last-scan, bytes-touched, last-run-age), a focused "Run a scan" panel with the primary-collection check + big lit Scan button, a Last-scan summary panel (sanity-guard verdict, counts-by-reason rows with byte-share %), an auto-discovered Collections list, and a recent-runs feed. Dry-run banner up top stays prominent until live mode is set.
+- ✅ **Settings.** Four cards: Primary collection picker, Active preset (with rule/whitelist/priority counts under the dropdown), Retention + sanity-guard sliders (with dirty-state save button + inline validation 1..365), and Disable-dry-run with inline phrase-match (full M12 dialog still pending). Each mutation invalidates the right TanStack Query keys.
+- ✅ **TanStack Query 5.** All reads via `useQuery` with the centralized `keys` map; mutations use `useMutation` and `qc.invalidateQueries(keys.X())` for stale-while-revalidate behavior. The Scan flow uses `qc.setQueryData` to seed the report into the cache before the refetch lands.
+- ✅ **SPA fallback.** Fastify's `setNotFoundHandler` returns `web/dist/index.html` for non-`/api` 404s so a hard refresh on `/settings` works; `/api/*` 404s remain structured JSON.
+- ✅ **Backlog items closed in this milestone:**
+  - #12 (`boot()` DB-handle leak) — wrapped post-`openDb` boot work in try/catch so any throw before the server takes ownership closes the handle.
+  - #26 (`discoverCollections` dot-dir skip undocumented) — added a docstring explaining why every dot-prefixed directory is filtered, not just `.dedupe*`.
+- ✅ **Tests added:** `web/src/pages/__tests__/Dashboard.test.tsx` (5 cases: dry-run banner, live banner, collections render, Scan-now POST + summary, primary-required disabled state), `web/src/pages/__tests__/Settings.test.tsx` (6 cases: cards render, preset switch → PUT /config, retention/sanity-guard save patches, retention validation, exact-phrase dry-run gate, set-primary). Server suite gained two contract tests for the SPA fallback (HTML return for `/settings`, JSON 404 for unknown `/api/*`). Final tally: **108 server tests, 18 web tests — all green.**
+- ⬜ **Deferred to later milestones:**
+  - Backlog #21 (scan results held in memory; lost on restart) — bigger refactor; defer to M11.
+  - Backlog #22 (`listAllActions` 1k-row cap, `/audit` truncation) — defer to M10 when the Audit page lands.
 
 ### ⬜ M10. Quarantine + Audit Log + Review Queue pages
 
