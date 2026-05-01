@@ -14,6 +14,7 @@ import { Badge } from '../components/Badge.js';
 import { Field, inputClass, selectClass } from '../components/Field.js';
 import { DataTable, type ColumnDef, type SortState } from '../components/DataTable.js';
 import { formatBytes, formatRelativeTime } from '../lib/format.js';
+import { csvEscape, downloadCsv } from '../lib/csv.js';
 import { cn } from '../lib/cn.js';
 
 const PAGE_SIZE = 100;
@@ -50,7 +51,7 @@ export function AuditLogPage() {
   }, [filters, page]);
 
   const audit = useQuery({
-    queryKey: ['audit', queryParams] as const,
+    queryKey: [...keys.audit(), queryParams] as const,
     queryFn: () => api.listAudit(queryParams),
     placeholderData: (prev) => prev,
   });
@@ -180,7 +181,24 @@ export function AuditLogPage() {
   );
 
   function exportCsv() {
-    const headers = ['id', 'run_id', 'collection', 'src_rel_path', 'reason', 'size', 'planned_at', 'executed_at', 'restored_at', 'purged_at', 'error'];
+    // The audit CSV intentionally exports more columns than the visible
+    // table (executed/restored/purged timestamps + error) so it can serve
+    // as a real audit artifact, not just a screen dump. That's why we
+    // don't reuse `useTable.exportCsv` here. csvEscape is shared though,
+    // so formula-injection mitigation lives in one place.
+    const headers = [
+      'id',
+      'run_id',
+      'collection',
+      'src_rel_path',
+      'reason',
+      'size',
+      'planned_at',
+      'executed_at',
+      'restored_at',
+      'purged_at',
+      'error',
+    ];
     const lines = [headers.join(',')];
     for (const r of sortedItems) {
       const cols = [
@@ -198,15 +216,7 @@ export function AuditLogPage() {
       ].map((v) => csvEscape(String(v)));
       lines.push(cols.join(','));
     }
-    const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'audit.csv';
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
+    downloadCsv('audit.csv', lines.join('\n'));
   }
 
   const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE));
@@ -430,11 +440,4 @@ function Pagination({
       </div>
     </div>
   );
-}
-
-function csvEscape(s: string): string {
-  if (s.includes(',') || s.includes('"') || s.includes('\n')) {
-    return `"${s.replace(/"/g, '""')}"`;
-  }
-  return s;
 }

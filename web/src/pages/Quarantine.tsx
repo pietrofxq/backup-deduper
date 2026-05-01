@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   AlertTriangle,
@@ -54,6 +54,28 @@ export function QuarantinePage() {
     (collections.data ?? []).forEach((c) => m.set(c.id, c));
     return m;
   }, [collections.data]);
+
+  // Bridge for the circular dep: `runRestore.onSuccess` needs to clear the
+  // table selection, but `table` is built from `columns`, and `columns` needs
+  // `runRestore`. The ref is assigned after `table` exists; the closure in
+  // onSuccess always reads the latest `clear` at call time.
+  const clearSelectionRef = useRef<() => void>(() => {});
+
+  const runRestore = useMutation({
+    mutationFn: (args: { ids: number[]; allowSidecar?: boolean }) =>
+      api.restoreQuarantine(args.ids, args.allowSidecar),
+    onSuccess: (summary) => {
+      setError(null);
+      const counts = countOutcomes(summary.outcomes);
+      setRestoreSummary({ counts, total: summary.outcomes.length });
+      clearSelectionRef.current();
+      qc.invalidateQueries({ queryKey: keys.quarantine() });
+      qc.invalidateQueries({ queryKey: keys.audit() });
+    },
+    onError: (err) => {
+      setError(err instanceof ApiError ? err.message : 'Restore failed');
+    },
+  });
 
   const columns = useMemo<ColumnDef<QuarantineAction>[]>(
     () => [
@@ -146,7 +168,10 @@ export function QuarantinePage() {
         className: 'text-right',
       },
     ],
-    [collectionMap],
+    // `runRestore.mutate` is a stable reference in react-query v5, but
+    // `runRestore.isPending` flips during a mutation. Memoizing on it keeps
+    // the per-row Restore buttons accurately disabled while a restore runs.
+    [collectionMap, runRestore.mutate, runRestore.isPending],
   );
 
   const table = useTable({
@@ -156,22 +181,7 @@ export function QuarantinePage() {
     initialSort: { id: 'executed_at', dir: 'desc' },
     initialPageSize: 50,
   });
-
-  const runRestore = useMutation({
-    mutationFn: (args: { ids: number[]; allowSidecar?: boolean }) =>
-      api.restoreQuarantine(args.ids, args.allowSidecar),
-    onSuccess: (summary) => {
-      setError(null);
-      const counts = countOutcomes(summary.outcomes);
-      setRestoreSummary({ counts, total: summary.outcomes.length });
-      table.selection.clear();
-      qc.invalidateQueries({ queryKey: keys.quarantine() });
-      qc.invalidateQueries({ queryKey: keys.audit() });
-    },
-    onError: (err) => {
-      setError(err instanceof ApiError ? err.message : 'Restore failed');
-    },
-  });
+  clearSelectionRef.current = table.selection.clear;
 
   const runPurgeDry = useMutation({
     mutationFn: () => api.purgeQuarantine(true),

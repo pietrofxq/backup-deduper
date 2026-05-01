@@ -488,6 +488,21 @@ export interface AuditPage {
   offset: number;
 }
 
+/**
+ * `planned_at` is stored as the SQLite datetime literal `YYYY-MM-DD HH:MM:SS`.
+ * The UI sends date-only `YYYY-MM-DD` from `<input type="date">`. A naive
+ * lexicographic compare then makes `before=2025-01-01` exclude every row
+ * planned later that day. Expand a date-only value to a full-day window:
+ * `after` stays at `00:00:00` (already correct as-is, but anchored explicitly
+ * to be unambiguous), `before` is bumped to `23:59:59`.
+ */
+const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/;
+
+function expandDateBound(s: string, end: boolean): string {
+  if (!DATE_ONLY.test(s)) return s;
+  return end ? `${s} 23:59:59` : `${s} 00:00:00`;
+}
+
 function buildAuditWhere(filters: AuditFilters): SQL | undefined {
   const parts: SQL[] = [];
   if (filters.runId !== undefined) {
@@ -497,10 +512,10 @@ function buildAuditWhere(filters: AuditFilters): SQL | undefined {
     parts.push(eq(s.quarantineAction.reason, filters.reason));
   }
   if (filters.after !== undefined && filters.after !== '') {
-    parts.push(gte(s.quarantineAction.plannedAt, filters.after));
+    parts.push(gte(s.quarantineAction.plannedAt, expandDateBound(filters.after, false)));
   }
   if (filters.before !== undefined && filters.before !== '') {
-    parts.push(lte(s.quarantineAction.plannedAt, filters.before));
+    parts.push(lte(s.quarantineAction.plannedAt, expandDateBound(filters.before, true)));
   }
   if (parts.length === 0) return undefined;
   if (parts.length === 1) return parts[0];

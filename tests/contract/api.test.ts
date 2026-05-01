@@ -418,6 +418,54 @@ describe('API — scan + quarantine + restore', () => {
     expect(empty.total).toBe(0);
     expect(empty.reasons.length).toBeGreaterThan(0);
   });
+
+  it('GET /audit treats date-only before/after bounds as full-day windows', async () => {
+    // Regression for Copilot review on PR #3: planned_at is stored as
+    // `YYYY-MM-DD HH:MM:SS`, so a naive lexicographic `before=2025-01-01`
+    // would exclude every row planned later that day. The query layer now
+    // expands a date-only bound to a full-day window.
+    await setup({
+      'Backup-A/photo.jpg': 'photo',
+      'Backup-B/photo.jpg': 'photo',
+    });
+    const cols = JSON.parse(
+      (await app.inject({ method: 'GET', url: '/api/collections' })).body,
+    );
+    const primary = cols.find((c: { relPath: string }) => c.relPath === 'Backup-B')!;
+    await app.inject({
+      method: 'POST',
+      url: '/api/collections/set-primary',
+      payload: { collectionId: primary.id },
+    });
+    await app.inject({
+      method: 'POST',
+      url: '/api/config/disable-dry-run',
+      payload: { phrase: 'I have reviewed the dry-run report' },
+    });
+    const scan = JSON.parse(
+      (await app.inject({ method: 'POST', url: '/api/scans', payload: {} })).body,
+    );
+    await app.inject({
+      method: 'POST',
+      url: '/api/quarantine/run',
+      payload: { scanRunId: scan.runId },
+    });
+
+    // Today in UTC — `planned_at` is set via SQLite `datetime('now')` which
+    // is UTC. With the buggy lex-compare, `before=<today>` would exclude
+    // the row we just inserted; with the fix it must be included.
+    const today = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
+    const filtered = JSON.parse(
+      (
+        await app.inject({
+          method: 'GET',
+          url: `/api/audit?after=${today}&before=${today}`,
+        })
+      ).body,
+    );
+    expect(filtered.total).toBeGreaterThan(0);
+    expect(filtered.items.length).toBe(filtered.total);
+  });
 });
 
 describe('API — SPA fallback', () => {

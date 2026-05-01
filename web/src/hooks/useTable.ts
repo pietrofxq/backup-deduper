@@ -1,5 +1,6 @@
 import { useCallback, useMemo, useState } from 'react';
 import type { ColumnDef, SortState } from '../components/DataTable.js';
+import { csvEscape, downloadCsv } from '../lib/csv.js';
 
 /**
  * useTable — local sort, pagination, and row selection for an in-memory list.
@@ -119,9 +120,7 @@ export function useTable<T>({
 
   const exportCsv = useCallback(
     (filename = 'export.csv') => {
-      const header = columns
-        .map((c) => csvEscape(stringHeader(c.header)))
-        .join(',');
+      const header = columns.map((c) => csvEscape(headerLabel(c))).join(',');
       const body = sorted
         .map((row) =>
           columns
@@ -129,16 +128,7 @@ export function useTable<T>({
             .join(','),
         )
         .join('\n');
-      const csv = `${header}\n${body}`;
-      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = filename;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
+      downloadCsv(filename, `${header}\n${body}`);
     },
     [columns, sorted],
   );
@@ -166,20 +156,19 @@ export function useTable<T>({
   };
 }
 
-function csvEscape(s: string): string {
-  if (s.includes(',') || s.includes('"') || s.includes('\n')) {
-    return `"${s.replace(/"/g, '""')}"`;
-  }
-  return s;
-}
-
 function toCsvValue(v: string | number | null): string {
   if (v == null) return '';
   return String(v);
 }
 
-function stringHeader(h: unknown): string {
-  if (typeof h === 'string') return h;
-  if (typeof h === 'number') return String(h);
-  return '';
+/**
+ * Column headers are `ReactNode` so they can render icons or styled text.
+ * For CSV we need a plain label — fall back to the column id when the
+ * header isn't a primitive (otherwise non-string headers would produce
+ * empty column names in the export).
+ */
+function headerLabel<T>(c: ColumnDef<T>): string {
+  if (typeof c.header === 'string') return c.header;
+  if (typeof c.header === 'number') return String(c.header);
+  return c.id;
 }
