@@ -20,13 +20,50 @@ jobs:
         with:
           node-version: ${{ matrix.node }}
           cache: npm
-      - run: npm ci
-      - name: Typecheck
-        run: npx tsc -p tsconfig.json --noEmit
-      - name: Test (unit + integration + contract + property)
+
+      # ---- install -------------------------------------------------------
+      - name: Install (root)
+        run: npm ci
+      - name: Install (web)
+        run: npm --prefix web ci
+
+      # ---- lint ----------------------------------------------------------
+      # ESLint runs flat-config linting over both packages. Errors fail CI;
+      # warnings (e.g. react-refresh/only-export-components on some shared
+      # files) are tolerated. Run on all matrix legs so platform-specific
+      # source (winLong.ts) gets covered too.
+      - name: Lint (server)
+        run: npm run lint
+      - name: Lint (web)
+        run: npm run lint:web
+
+      # ---- typecheck -----------------------------------------------------
+      # Server uses the root tsconfig; web is a TS project-references graph
+      # (tsc -b) that fans out into app + node configs. Both must pass before
+      # tests so a type error at the seam fails fast.
+      - name: Typecheck (server)
+        run: npm run typecheck
+      - name: Typecheck (web)
+        run: npm run typecheck:web
+
+      # ---- build ---------------------------------------------------------
+      # Verifies that the emit pipeline (tsc + vite + the migrations copy
+      # step in the root build script) actually runs to completion. A
+      # passing typecheck does not guarantee a passing build — the root
+      # build also copies SQL migrations into dist/, and the web build runs
+      # vite which can discover issues tsc doesn't (asset resolution, etc.).
+      - name: Build (server)
+        run: npm run build
+      - name: Build (web)
+        run: npm run build:web
+
+      # ---- test ----------------------------------------------------------
+      - name: Test — server (unit + integration + contract + property)
         run: npm test
         env:
           LOG_LEVEL: silent
+      - name: Test — web (component)
+        run: npm run test:web
 
   thorough:
     name: Property test at numRuns=500 (Linux)
