@@ -247,7 +247,18 @@ export function executeQuarantine(
 
   // Empty-dir sweep: only touch directories that are STILL empty after the
   // file moves (a dir that became empty by our doing is fair game).
-  for (const e of emptyDirs) {
+  //
+  // Process bottom-up — deepest first. Otherwise `Backup-A/Foo/` gets
+  // rmdir'd before `Backup-A/Foo/Bar/` is checked, and the latter raises
+  // ENOENT and gets logged as a "skip" even though it could have been
+  // removed. Sorting by descending segment count is enough: lex-tied
+  // siblings can be removed in any order.
+  const sortedEmptyDirs = [...emptyDirs].sort((a, b) => {
+    const da = a.relPath.split('/').length;
+    const db_ = b.relPath.split('/').length;
+    return db_ - da;
+  });
+  for (const e of sortedEmptyDirs) {
     const abs = path.join(targetRoot, e.collection.rel_path, fromDbRelPath(e.relPath));
     if (!isPathWithin(targetRoot, abs)) continue;
     try {

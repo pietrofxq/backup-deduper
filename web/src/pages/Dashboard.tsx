@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   AlertTriangle,
@@ -10,8 +10,10 @@ import {
   Database,
   FileSearch,
   Layers,
+  Loader2,
   Play,
   ShieldCheck,
+  Square,
   Star,
 } from 'lucide-react';
 import {
@@ -26,6 +28,7 @@ import { Card, CardBody, CardHeader } from '../components/Card.js';
 import { Button } from '../components/Button.js';
 import { StatTile } from '../components/StatTile.js';
 import { Badge } from '../components/Badge.js';
+import { useScanEvents } from '../hooks/useScanEvents.js';
 import { cn } from '../lib/cn.js';
 import {
   formatBytes,
@@ -45,6 +48,7 @@ export function DashboardPage() {
   const api = useApi();
   const qc = useQueryClient();
   const [scanError, setScanError] = useState<string | null>(null);
+  const progress = useScanEvents();
 
   const collections = useQuery({
     queryKey: keys.collections(),
@@ -75,6 +79,18 @@ export function DashboardPage() {
       setScanError(err instanceof ApiError ? err.message : 'Scan failed');
     },
   });
+
+  const cancelScan = useMutation({
+    mutationFn: (runId: number) => api.cancelScan(runId),
+  });
+
+  // When a run terminates over SSE, refresh the scan list so the sidebar /
+  // history reflects the new terminal status without waiting for a refetch.
+  useEffect(() => {
+    if (progress.finished) {
+      qc.invalidateQueries({ queryKey: keys.scans() });
+    }
+  }, [progress.finished, qc]);
 
   const primary = collections.data?.find((c) => c.isPrimary) ?? null;
 
@@ -143,11 +159,18 @@ export function DashboardPage() {
           onScan={() => startScan.mutate()}
           error={scanError}
           primaryRelPath={primary?.relPath ?? null}
+          inFlight={startScan.isPending && !progress.finished}
+          runId={progress.runId}
+          onCancel={() => {
+            if (progress.runId !== null) cancelScan.mutate(progress.runId);
+          }}
+          cancelling={cancelScan.isPending}
         />
-        <LastScanSummary
-          loading={lastScan.isLoading}
-          report={report}
-        />
+        {startScan.isPending && !progress.finished ? (
+          <LiveProgress progress={progress} />
+        ) : (
+          <LastScanSummary loading={lastScan.isLoading} report={report} />
+        )}
       </div>
 
       <Collections list={collections.data ?? []} />
@@ -206,11 +229,19 @@ function ScanPanel({
   onScan,
   error,
   primaryRelPath,
+  inFlight,
+  runId,
+  onCancel,
+  cancelling,
 }: {
   loading: boolean;
   onScan: () => void;
   error: string | null;
   primaryRelPath: string | null;
+  inFlight: boolean;
+  runId: number | null;
+  onCancel: () => void;
+  cancelling: boolean;
 }) {
   return (
     <Card className="flex flex-col">
@@ -232,23 +263,143 @@ function ScanPanel({
           </Row>
         </div>
         <div className="space-y-2">
-          <Button
-            variant="primary"
-            size="lg"
-            className="w-full"
-            leadingIcon={<Play size={16} fill="currentColor" />}
-            loading={loading}
-            disabled={!primaryRelPath}
-            onClick={onScan}
-          >
-            {loading ? 'Scanning…' : 'Scan now'}
-          </Button>
+          {inFlight && runId !== null ? (
+            <Button
+              variant="danger"
+              size="lg"
+              className="w-full"
+              leadingIcon={<Square size={14} fill="currentColor" />}
+              loading={cancelling}
+              onClick={onCancel}
+            >
+              {cancelling ? 'Cancelling…' : `Cancel scan #${runId}`}
+            </Button>
+          ) : (
+            <Button
+              variant="primary"
+              size="lg"
+              className="w-full"
+              leadingIcon={<Play size={16} fill="currentColor" />}
+              loading={loading}
+              disabled={!primaryRelPath}
+              onClick={onScan}
+            >
+              {loading ? 'Scanning…' : 'Scan now'}
+            </Button>
+          )}
           {error && (
             <p className="rounded bg-(--color-danger)/10 px-2.5 py-1.5 text-xs text-(--color-danger)">
               {error}
             </p>
           )}
         </div>
+      </CardBody>
+    </Card>
+  );
+}
+
+function LiveProgress({
+  progress,
+}: {
+  progress: ReturnType<typeof useScanEvents>;
+}) {
+  const pct =
+    progress.hashed && progress.hashed.total > 0
+      ? Math.min(100, Math.round((progress.hashed.index / progress.hashed.total) * 100))
+      : null;
+
+  const phaseLabel: Record<string, string> = {
+    started: 'Starting…',
+    scan: 'Walking collections',
+    classify: 'Classifying actions',
+    report: 'Writing report',
+    execute: 'Executing',
+    done: 'Done',
+    aborted: 'Aborted',
+    failed: 'Failed',
+  };
+
+  return (
+    <Card>
+      <CardHeader
+        title={
+          <span className="inline-flex items-center gap-2">
+            <Loader2 size={14} className="animate-spin" />
+            Scan in progress
+            {progress.runId !== null && (
+              <span className="text-(--color-text-subtle) tabular-nums">
+                #{progress.runId}
+              </span>
+            )}
+          </span>
+        }
+        description={progress.connected ? 'Streaming progress' : 'Reconnecting…'}
+      />
+      <CardBody className="space-y-4">
+        <div>
+          <div className="mb-1.5 flex items-center justify-between text-xs">
+            <span className="font-medium">
+              {progress.phase ? phaseLabel[progress.phase] ?? progress.phase : 'Working'}
+            </span>
+            {progress.hashed && (
+              <span className="text-(--color-text-muted) tabular-nums">
+                {formatCount(progress.hashed.index)} / {formatCount(progress.hashed.total)}
+                {pct !== null && ` · ${pct}%`}
+              </span>
+            )}
+          </div>
+          <div className="h-2 overflow-hidden rounded-full bg-(--color-surface-3)">
+            <div
+              className="h-full bg-(--color-accent-500) transition-all duration-150"
+              style={{ width: pct === null ? '15%' : `${pct}%` }}
+            />
+          </div>
+        </div>
+
+        {progress.discovered && (
+          <div className="grid grid-cols-2 gap-2 text-sm">
+            <Inline
+              label="Collection"
+              value={
+                <span className="truncate font-mono text-xs">
+                  {progress.discovered.collection}
+                </span>
+              }
+            />
+            <Inline
+              label="Files found"
+              value={formatCount(progress.discovered.files)}
+            />
+          </div>
+        )}
+
+        {progress.hashed && (
+          <div>
+            <div className="text-[10.5px] uppercase tracking-wider text-(--color-text-subtle)">
+              Hashing
+            </div>
+            <div className="mt-0.5 truncate font-mono text-xs">
+              {progress.hashed.relPath}
+            </div>
+          </div>
+        )}
+
+        {progress.classified && (
+          <div className="grid grid-cols-3 gap-2 rounded-md border border-(--color-border) bg-(--color-surface) p-3 text-center text-sm">
+            <Inline label="Actions" value={formatCount(progress.classified.actions)} />
+            <Inline label="Review" value={formatCount(progress.classified.reviewPairs)} />
+            <Inline
+              label="Empty dirs"
+              value={formatCount(progress.classified.emptyDirs)}
+            />
+          </div>
+        )}
+
+        {progress.error && (
+          <p className="rounded bg-(--color-danger)/10 px-2.5 py-1.5 text-xs text-(--color-danger)">
+            {progress.error}
+          </p>
+        )}
       </CardBody>
     </Card>
   );

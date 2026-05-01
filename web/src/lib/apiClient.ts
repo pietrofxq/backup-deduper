@@ -130,6 +130,9 @@ export function createApiClient(opts: ApiClientOptions = {}) {
       }),
     purgeQuarantine: (dryRun = true) =>
       request<PurgeSummary>('POST', '/quarantine/purge', { dryRun }),
+
+    cancelScan: (runId: number) =>
+      request<{ ok: true; runId: number }>('POST', `/scans/${runId}/cancel`, {}),
   };
 }
 

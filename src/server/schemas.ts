@@ -89,7 +89,7 @@ export const ScanDetailResponse = z.object({
 
 export const ScanGateError = z.object({
   error: z.string(),
-  kind: z.enum(['dry_run_gate', 'unknown_preset', 'unreadable_subtree']),
+  kind: z.enum(['dry_run_gate', 'unknown_preset', 'unreadable_subtree', 'aborted']),
   unreadablePaths: z.array(z.string()).optional(),
   collectionRelPath: z.string().optional(),
 });

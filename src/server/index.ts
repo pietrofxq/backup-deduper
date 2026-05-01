@@ -7,6 +7,7 @@ import {
 } from 'fastify-type-provider-zod';
 import type { Db } from '../db/index.js';
 import { registerRoutes } from './routes/index.js';
+import { EventBus, globalEventBus } from './events/bus.js';
 
 /**
  * CORS allowlist for development. The Vite dev server runs on a different
@@ -37,6 +38,12 @@ export interface ServerDeps {
   port: number;
   /** When true (tests), don't actually .listen — just build the instance. */
   dontListen?: boolean;
+  /**
+   * Pub-sub bus for SSE progress streaming. Defaults to the singleton so
+   * production callers can omit it; tests pass a fresh bus per scenario to
+   * keep subscriber state isolated.
+   */
+  events?: EventBus;
 }
 
 export interface ServerHandle {
@@ -68,7 +75,8 @@ export async function startServer(deps: ServerDeps): Promise<ServerHandle> {
     methods: ['GET', 'PUT', 'POST', 'DELETE', 'OPTIONS'],
   });
 
-  await registerRoutes(typed, deps);
+  const events = deps.events ?? globalEventBus;
+  await registerRoutes(typed, { ...deps, events });
 
   if (deps.dontListen) {
     await app.ready();

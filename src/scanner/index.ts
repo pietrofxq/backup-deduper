@@ -51,6 +51,13 @@ export interface ScanOptions {
   onlyCollections?: string[];
   /** Optional progress callback for SSE. */
   onProgress?: (event: ScanProgressEvent) => void;
+  /**
+   * Optional cancellation signal — cooperatively checked between hashed
+   * files. Aborting mid-walk is not supported (the walker is fast-glob
+   * and doesn't take a signal); aborting between files is the granularity
+   * the user actually cares about for UX.
+   */
+  signal?: AbortSignal;
 }
 
 export type ScanProgressEvent =
@@ -190,6 +197,19 @@ async function scanCollection(
   // Cache key: (size, mtime_ms) per (collection_id, rel_path).
   // Unchanged → reuse. Changed → re-hash. Missing row → hash (new file).
   for (let i = 0; i < walk.files.length; i++) {
+    if (opts.signal?.aborted) {
+      // Surface as an abort to the orchestrator. We don't manufacture a
+      // ScanAbortedError here because that lives in the orchestrator layer;
+      // a generic abort error is fine — the orchestrator's check after the
+      // call returns will fire ScanAbortedError before it reaches the route.
+      // We use throw rather than break so that finally{} closes the pool
+      // and the partial-summary doesn't get written.
+      const reason =
+        opts.signal.reason instanceof Error
+          ? opts.signal.reason
+          : new Error(String(opts.signal.reason ?? 'aborted'));
+      throw reason;
+    }
     const f = walk.files[i];
     if (!f) continue;
     const existing = getFile(db, collectionId, f.relPath);
