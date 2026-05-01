@@ -1,7 +1,11 @@
 import { z } from 'zod';
 import type { ServerDeps } from '../index.js';
 import type { ZodApp } from '../types.js';
-import { listActiveActions, listAllActions } from '../../db/queries.js';
+import {
+  listActiveActions,
+  listAuditPage,
+  listAuditReasons,
+} from '../../db/queries.js';
 import { bulkRestore } from '../../mover/restore.js';
 import { purge } from '../../mover/purge.js';
 import { loadConfig } from '../../config/loader.js';
@@ -12,6 +16,7 @@ import {
   SanityGuardError,
 } from '../../orchestrator/quarantineJob.js';
 import {
+  AuditPageResponse,
   BulkRestoreSummary,
   ErrorResponse,
   PurgeSummary,
@@ -53,10 +58,37 @@ export async function registerQuarantineRoutes(
     async (req) => listActiveActions(deps.db, req.query.runId),
   );
 
+  const AuditQuery = z.object({
+    runId: z.coerce.number().int().positive().optional(),
+    reason: z.string().min(1).optional(),
+    after: z.string().min(1).optional(),
+    before: z.string().min(1).optional(),
+    limit: z.coerce.number().int().min(1).max(500).default(100),
+    offset: z.coerce.number().int().nonnegative().default(0),
+  });
+
   app.get(
     '/audit',
-    { schema: { response: { 200: z.array(QuarantineActionRow) } } },
-    async () => listAllActions(deps.db),
+    {
+      schema: {
+        querystring: AuditQuery,
+        response: { 200: AuditPageResponse },
+      },
+    },
+    async (req) => {
+      const page = listAuditPage(
+        deps.db,
+        {
+          runId: req.query.runId,
+          reason: req.query.reason,
+          after: req.query.after,
+          before: req.query.before,
+        },
+        req.query.limit,
+        req.query.offset,
+      );
+      return { ...page, reasons: listAuditReasons(deps.db) };
+    },
   );
 
   app.post(

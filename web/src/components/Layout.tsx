@@ -49,9 +49,9 @@ interface NavItem {
 const NAV_ITEMS: NavItem[] = [
   { to: '/', label: 'Dashboard', icon: <GaugeCircle size={16} /> },
   { to: '/settings', label: 'Settings', icon: <Settings size={16} /> },
-  { to: '/quarantine', label: 'Quarantine', icon: <Archive size={16} />, pending: true },
-  { to: '/audit', label: 'Audit log', icon: <ClipboardList size={16} />, pending: true },
-  { to: '/review', label: 'Review queue', icon: <Activity size={16} />, pending: true },
+  { to: '/quarantine', label: 'Quarantine', icon: <Archive size={16} /> },
+  { to: '/audit', label: 'Audit log', icon: <ClipboardList size={16} /> },
+  { to: '/review', label: 'Review queue', icon: <Activity size={16} /> },
 ];
 
 function Sidebar() {

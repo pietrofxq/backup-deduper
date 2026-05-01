@@ -11,6 +11,12 @@ export const keys = {
   scans: () => ['scans'] as const,
   scan: (id: number) => ['scans', id] as const,
   review: (status?: string) => ['review', status ?? 'all'] as const,
+  /**
+   * Root for invalidating every review-status variant at once. `keys.review()`
+   * returns `['review', 'all']` and only invalidates that single variant; this
+   * key matches every `['review', ...]` cache entry.
+   */
+  reviewRoot: () => ['review'] as const,
   quarantine: (runId?: number) => ['quarantine', runId ?? 'all'] as const,
   audit: () => ['audit'] as const,
 };

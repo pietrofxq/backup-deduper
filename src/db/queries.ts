@@ -1,4 +1,16 @@
-import { and, desc, eq, isNotNull, isNull, lt, or, sql } from 'drizzle-orm';
+import {
+  and,
+  desc,
+  eq,
+  gte,
+  isNotNull,
+  isNull,
+  lt,
+  lte,
+  or,
+  sql,
+  type SQL,
+} from 'drizzle-orm';
 import type { Db } from './index.js';
 import * as s from './schema.js';
 
@@ -458,6 +470,104 @@ export function listAllActions(db: Db, runId?: number): QuarantineActionRow[] {
     .limit(1000)
     .all()
     .map(rowAction);
+}
+
+export interface AuditFilters {
+  runId?: number;
+  reason?: string;
+  /** Inclusive lower bound on planned_at (SQLite datetime string, e.g. "2025-01-01"). */
+  after?: string;
+  /** Inclusive upper bound on planned_at. */
+  before?: string;
+}
+
+export interface AuditPage {
+  items: QuarantineActionRow[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+/**
+ * `planned_at` is stored as the SQLite datetime literal `YYYY-MM-DD HH:MM:SS`.
+ * The UI sends date-only `YYYY-MM-DD` from `<input type="date">`. A naive
+ * lexicographic compare then makes `before=2025-01-01` exclude every row
+ * planned later that day. Expand a date-only value to a full-day window:
+ * `after` stays at `00:00:00` (already correct as-is, but anchored explicitly
+ * to be unambiguous), `before` is bumped to `23:59:59`.
+ */
+const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/;
+
+function expandDateBound(s: string, end: boolean): string {
+  if (!DATE_ONLY.test(s)) return s;
+  return end ? `${s} 23:59:59` : `${s} 00:00:00`;
+}
+
+function buildAuditWhere(filters: AuditFilters): SQL | undefined {
+  const parts: SQL[] = [];
+  if (filters.runId !== undefined) {
+    parts.push(eq(s.quarantineAction.runId, filters.runId));
+  }
+  if (filters.reason !== undefined && filters.reason !== '') {
+    parts.push(eq(s.quarantineAction.reason, filters.reason));
+  }
+  if (filters.after !== undefined && filters.after !== '') {
+    parts.push(gte(s.quarantineAction.plannedAt, expandDateBound(filters.after, false)));
+  }
+  if (filters.before !== undefined && filters.before !== '') {
+    parts.push(lte(s.quarantineAction.plannedAt, expandDateBound(filters.before, true)));
+  }
+  if (parts.length === 0) return undefined;
+  if (parts.length === 1) return parts[0];
+  return and(...parts);
+}
+
+export function listAuditPage(
+  db: Db,
+  filters: AuditFilters = {},
+  limit = 100,
+  offset = 0,
+): AuditPage {
+  const where = buildAuditWhere(filters);
+  const totalRow = where
+    ? db.q
+        .select({ n: sql<number>`count(*)` })
+        .from(s.quarantineAction)
+        .where(where)
+        .get()
+    : db.q
+        .select({ n: sql<number>`count(*)` })
+        .from(s.quarantineAction)
+        .get();
+  const total = totalRow?.n ?? 0;
+
+  const rows = where
+    ? db.q
+        .select()
+        .from(s.quarantineAction)
+        .where(where)
+        .orderBy(desc(s.quarantineAction.id))
+        .limit(limit)
+        .offset(offset)
+        .all()
+    : db.q
+        .select()
+        .from(s.quarantineAction)
+        .orderBy(desc(s.quarantineAction.id))
+        .limit(limit)
+        .offset(offset)
+        .all();
+  return { items: rows.map(rowAction), total, limit, offset };
+}
+
+/** Distinct `reason` values present in the audit table — used to populate the UI filter dropdown. */
+export function listAuditReasons(db: Db): string[] {
+  return db.q
+    .selectDistinct({ reason: s.quarantineAction.reason })
+    .from(s.quarantineAction)
+    .orderBy(s.quarantineAction.reason)
+    .all()
+    .map((r) => r.reason);
 }
 
 export function markActionRestored(db: Db, actionId: number): void {

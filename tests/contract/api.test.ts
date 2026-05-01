@@ -337,6 +337,137 @@ describe('API — scan + quarantine + restore', () => {
     });
     expect(r.statusCode).toBe(400);
   });
+
+  it('GET /audit returns paginated shape with reasons array and respects filters', async () => {
+    // Run an end-to-end scan + quarantine so the audit table has rows of
+    // mixed reasons. We need at least one cruft and one duplicate to exercise
+    // the reason filter; using a thumbnail-style sidecar gets us cruft.
+    await setup({
+      'Backup-A/photo.jpg': 'photo',
+      'Backup-B/photo.jpg': 'photo',
+      'Backup-A/.thumbs/photo.jpg': 'thumb',
+    });
+    const cols = JSON.parse(
+      (await app.inject({ method: 'GET', url: '/api/collections' })).body,
+    );
+    const primary = cols.find((c: { relPath: string }) => c.relPath === 'Backup-B')!;
+    await app.inject({
+      method: 'POST',
+      url: '/api/collections/set-primary',
+      payload: { collectionId: primary.id },
+    });
+    await app.inject({
+      method: 'POST',
+      url: '/api/config/disable-dry-run',
+      payload: { phrase: 'I have reviewed the dry-run report' },
+    });
+    const scanResp = await app.inject({ method: 'POST', url: '/api/scans', payload: {} });
+    const scan = JSON.parse(scanResp.body);
+    await app.inject({
+      method: 'POST',
+      url: '/api/quarantine/run',
+      payload: { scanRunId: scan.runId },
+    });
+
+    const all = JSON.parse(
+      (await app.inject({ method: 'GET', url: '/api/audit' })).body,
+    );
+    expect(Array.isArray(all.items)).toBe(true);
+    expect(typeof all.total).toBe('number');
+    expect(all.limit).toBe(100);
+    expect(all.offset).toBe(0);
+    expect(Array.isArray(all.reasons)).toBe(true);
+    expect(all.total).toBeGreaterThan(0);
+    // The default page is `limit=100`. Asserting `items.length === total`
+    // would silently break once the audit table grows past that limit.
+    expect(all.items.length).toBe(Math.min(all.total, all.limit));
+
+    // Filter by an existing reason — items should all match it; total
+    // matches the count for that reason. `total` is the pre-paged count.
+    const reason = all.reasons[0];
+    const filtered = JSON.parse(
+      (
+        await app.inject({
+          method: 'GET',
+          url: `/api/audit?reason=${encodeURIComponent(reason)}`,
+        })
+      ).body,
+    );
+    expect(filtered.items.every((i: { reason: string }) => i.reason === reason)).toBe(
+      true,
+    );
+    expect(filtered.total).toBeLessThanOrEqual(all.total);
+
+    // Pagination: limit=1 forces one item even when total > 1.
+    if (all.total > 1) {
+      const page1 = JSON.parse(
+        (await app.inject({ method: 'GET', url: '/api/audit?limit=1&offset=0' })).body,
+      );
+      expect(page1.items.length).toBe(1);
+      expect(page1.total).toBe(all.total);
+      const page2 = JSON.parse(
+        (await app.inject({ method: 'GET', url: '/api/audit?limit=1&offset=1' })).body,
+      );
+      expect(page2.items[0].id).not.toBe(page1.items[0].id);
+    }
+
+    // Unknown runId yields zero items but a valid envelope (and reasons
+    // remain populated — they're computed unfiltered).
+    const empty = JSON.parse(
+      (await app.inject({ method: 'GET', url: '/api/audit?runId=999999' })).body,
+    );
+    expect(empty.items).toEqual([]);
+    expect(empty.total).toBe(0);
+    expect(empty.reasons.length).toBeGreaterThan(0);
+  });
+
+  it('GET /audit treats date-only before/after bounds as full-day windows', async () => {
+    // Regression for Copilot review on PR #3: planned_at is stored as
+    // `YYYY-MM-DD HH:MM:SS`, so a naive lexicographic `before=2025-01-01`
+    // would exclude every row planned later that day. The query layer now
+    // expands a date-only bound to a full-day window.
+    await setup({
+      'Backup-A/photo.jpg': 'photo',
+      'Backup-B/photo.jpg': 'photo',
+    });
+    const cols = JSON.parse(
+      (await app.inject({ method: 'GET', url: '/api/collections' })).body,
+    );
+    const primary = cols.find((c: { relPath: string }) => c.relPath === 'Backup-B')!;
+    await app.inject({
+      method: 'POST',
+      url: '/api/collections/set-primary',
+      payload: { collectionId: primary.id },
+    });
+    await app.inject({
+      method: 'POST',
+      url: '/api/config/disable-dry-run',
+      payload: { phrase: 'I have reviewed the dry-run report' },
+    });
+    const scan = JSON.parse(
+      (await app.inject({ method: 'POST', url: '/api/scans', payload: {} })).body,
+    );
+    await app.inject({
+      method: 'POST',
+      url: '/api/quarantine/run',
+      payload: { scanRunId: scan.runId },
+    });
+
+    // Today in UTC — `planned_at` is set via SQLite `datetime('now')` which
+    // is UTC. With the buggy lex-compare, `before=<today>` would exclude
+    // the row we just inserted; with the fix it must be included.
+    const today = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
+    const filtered = JSON.parse(
+      (
+        await app.inject({
+          method: 'GET',
+          url: `/api/audit?after=${today}&before=${today}`,
+        })
+      ).body,
+    );
+    expect(filtered.total).toBeGreaterThan(0);
+    expect(filtered.items.length).toBe(Math.min(filtered.total, filtered.limit));
+  });
 });
 
 describe('API — SPA fallback', () => {
