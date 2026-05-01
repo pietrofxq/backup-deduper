@@ -74,12 +74,24 @@ export class EventBus {
    * replays buffered events with `id > lastEventId`. If those events are no
    * longer in the buffer (client fell too far behind), a synthetic
    * `replay_lost` event is sent and the client should refetch state.
+   *
+   * Replay handler invocations are wrapped in the same try/catch as
+   * `publish()` — a throwing subscriber (or an SSE writer to a closed
+   * socket) during replay must not bubble out of `subscribe()` and break
+   * the caller (typically the route registering the SSE stream).
    */
   subscribe(handler: Subscriber, lastEventId?: number): () => void {
+    const safeDeliver = (event: ScanEvent): void => {
+      try {
+        handler(event);
+      } catch {
+        /* same isolation contract as publish — see publish() */
+      }
+    };
     if (lastEventId !== undefined) {
       const oldest = this.buffer[0]?.id ?? this.nextId;
       if (lastEventId < oldest - 1) {
-        handler({
+        safeDeliver({
           id: this.nextId++,
           type: 'replay_lost',
           runId: null,
@@ -88,7 +100,7 @@ export class EventBus {
         });
       } else {
         for (const e of this.buffer) {
-          if (e.id > lastEventId) handler(e);
+          if (e.id > lastEventId) safeDeliver(e);
         }
       }
     }

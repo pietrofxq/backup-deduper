@@ -39,10 +39,24 @@ export async function registerEventRoutes(app: ZodApp, deps: ServerDeps): Promis
       // Each frame: id, event, data — separated by \n, terminated by \n\n.
       // JSON is single-line so newlines in payload would break the wire format;
       // JSON.stringify guarantees no raw newlines in the output.
+      //
+      // `event.data` is typed `unknown` on the bus, so we can't assume an
+      // object — a publisher passing a primitive or null would throw on
+      // spread. Guard explicitly: object payloads merge into the envelope,
+      // anything else gets nested under `value` so the client still sees it.
+      const envelope: Record<string, unknown> = {
+        runId: event.runId,
+        ts: event.ts,
+      };
+      if (event.data !== null && typeof event.data === 'object') {
+        Object.assign(envelope, event.data);
+      } else if (event.data !== undefined) {
+        envelope.value = event.data;
+      }
       reply.raw.write(
         `id: ${event.id}\n` +
           `event: ${event.type}\n` +
-          `data: ${JSON.stringify({ runId: event.runId, ts: event.ts, ...(event.data as object) })}\n\n`,
+          `data: ${JSON.stringify(envelope)}\n\n`,
       );
     };
 

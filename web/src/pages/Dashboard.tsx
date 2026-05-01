@@ -76,9 +76,32 @@ export function DashboardPage() {
       qc.invalidateQueries({ queryKey: keys.collections() });
     },
     onError: (err) => {
+      // User-initiated cancel surfaces as 409 + kind 'aborted' from the
+      // POST /api/scans handler. That's an expected terminal state, not a
+      // failure — silence the error banner so the UI doesn't flash a red
+      // toast every time the user clicks Cancel.
+      if (err instanceof ApiError && err.status === 409) {
+        const body = err.body as { kind?: string } | null;
+        if (body?.kind === 'aborted') {
+          setScanError(null);
+          qc.invalidateQueries({ queryKey: keys.scans() });
+          return;
+        }
+      }
       setScanError(err instanceof ApiError ? err.message : 'Scan failed');
     },
   });
+
+  const handleScan = () => {
+    // Reset SSE-derived progress state synchronously *before* the POST
+    // lands. Otherwise `progress.finished` from the previous run sticks
+    // until the next `phase: started` event arrives, briefly flipping the
+    // panel back to "Scan now" + last-scan summary while the new POST is
+    // already in flight.
+    progress.reset();
+    setScanError(null);
+    startScan.mutate();
+  };
 
   const cancelScan = useMutation({
     mutationFn: (runId: number) => api.cancelScan(runId),
@@ -91,6 +114,17 @@ export function DashboardPage() {
       qc.invalidateQueries({ queryKey: keys.scans() });
     }
   }, [progress.finished, qc]);
+
+  // `replay_lost` means our SSE connection caught up too late — buffer
+  // had rolled past us. Discard local progress derived from prior frames
+  // and refetch run state from the API.
+  const progressReset = progress.reset;
+  useEffect(() => {
+    if (progress.replayLost) {
+      qc.invalidateQueries({ queryKey: keys.scans() });
+      progressReset();
+    }
+  }, [progress.replayLost, qc, progressReset]);
 
   const primary = collections.data?.find((c) => c.isPrimary) ?? null;
 
@@ -156,17 +190,17 @@ export function DashboardPage() {
       <div className="grid gap-6 lg:grid-cols-[20rem_1fr]">
         <ScanPanel
           loading={startScan.isPending}
-          onScan={() => startScan.mutate()}
+          onScan={handleScan}
           error={scanError}
           primaryRelPath={primary?.relPath ?? null}
-          inFlight={startScan.isPending && !progress.finished}
+          inFlight={startScan.isPending}
           runId={progress.runId}
           onCancel={() => {
             if (progress.runId !== null) cancelScan.mutate(progress.runId);
           }}
           cancelling={cancelScan.isPending}
         />
-        {startScan.isPending && !progress.finished ? (
+        {startScan.isPending ? (
           <LiveProgress progress={progress} />
         ) : (
           <LastScanSummary loading={lastScan.isLoading} report={report} />

@@ -60,15 +60,14 @@ describe('uniqueDest', () => {
     );
   });
 
-  it('throws after the 10k overflow ceiling', () => {
-    // We don't actually create 10k files (slow on Windows); instead, stub
-    // exists by hand-crafting a directory structure and calling uniqueDest
-    // on a name that we *say* is taken via a custom guard. That stretches
-    // beyond the unit's contract, so simulate via a tight loop with a small
-    // ceiling instead — assert on the documented 10k limit by parameter
-    // injection. There is no public seam, so we do this the honest way:
-    // create just enough to verify it walks past 100, then trust the
-    // implementation's own bound (covered by code review).
+  it('walks well past 100 collisions and returns the next free slot', () => {
+    // The implementation caps suffix walking at 10_000 (see uniqueDest.ts).
+    // Creating 10_000 files is slow on Windows and not what's being tested
+    // here — that ceiling exists to prevent a runaway loop, not to encode
+    // a behaviour callers depend on. This test exercises a "many but
+    // tractable" collision count to verify the suffix walker keeps walking
+    // past trivial single-digit values; the 10k overflow is asserted via
+    // code review of the bound rather than a stress test.
     const dir = path.join(tmp, 'overflow');
     fs.mkdirSync(dir);
     fs.writeFileSync(path.join(dir, 'x.txt'), '');

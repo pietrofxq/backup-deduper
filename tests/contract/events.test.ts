@@ -48,7 +48,18 @@ afterEach(async () => {
   rmRf(root);
 });
 
-/** Read the SSE stream until `predicate` returns true OR the timeout elapses. */
+/**
+ * Read the SSE stream until `predicate` returns true OR the timeout elapses.
+ *
+ * The race against a 100ms tick is for liveness only — it must not be
+ * mistaken for "stream ended". The earlier version returned `{done: true}`
+ * from the timer branch, which broke the outer `while (Date.now() - start <
+ * timeoutMs)` loop on every quiet 100ms window even when the predicate
+ * still wanted more data. We now distinguish three states:
+ *   - reader done → stream really ended; break.
+ *   - reader yielded a chunk → decode + check predicate.
+ *   - timer won → no data this tick; continue looping until timeout.
+ */
 async function readStream(
   res: Response,
   predicate: (frames: ParsedFrame[]) => boolean,
@@ -60,16 +71,30 @@ async function readStream(
   const frames: ParsedFrame[] = [];
   let buffer = '';
   const start = Date.now();
+  type Tick =
+    | { kind: 'data'; value: Uint8Array | undefined; done: boolean }
+    | { kind: 'idle' };
+  // Web streams allow only one outstanding read at a time. Hold the same
+  // pending promise across timer wins; only fetch the next read after we've
+  // observed `kind: 'data'` on this one.
+  let pendingRead: Promise<Tick> | null = null;
   while (Date.now() - start < timeoutMs) {
-    const { value, done } = await Promise.race([
-      reader.read(),
-      new Promise<{ value: undefined; done: true }>((resolve) =>
-        setTimeout(() => resolve({ value: undefined, done: true }), 100),
-      ),
+    if (!pendingRead) {
+      pendingRead = reader
+        .read()
+        .then((r) => ({ kind: 'data' as const, value: r.value, done: r.done }));
+    }
+    const tick: Tick = await Promise.race<Tick>([
+      pendingRead,
+      new Promise<Tick>((resolve) => setTimeout(() => resolve({ kind: 'idle' as const }), 100)),
     ]);
-    if (done) break;
-    if (value) {
-      buffer += decoder.decode(value, { stream: true });
+    if (tick.kind === 'idle') {
+      continue;
+    }
+    pendingRead = null;
+    if (tick.done) break;
+    if (tick.value) {
+      buffer += decoder.decode(tick.value, { stream: true });
       // SSE frames are separated by \n\n.
       const parts = buffer.split('\n\n');
       buffer = parts.pop() ?? '';

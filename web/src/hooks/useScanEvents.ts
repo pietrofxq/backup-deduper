@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 /**
  * Subscribe to `/api/events` via EventSource. Only the most recent event of
@@ -35,6 +35,13 @@ export interface ScanProgressState {
   error: string | null;
   /** True when a `done` event has arrived for the current run. */
   finished: boolean;
+  /**
+   * Set when the bus emits `replay_lost` — the client reconnected with a
+   * `Last-Event-ID` older than the server's ring buffer. Whatever progress
+   * we've shown is potentially stale; consumers should refetch authoritative
+   * state (e.g. `qc.invalidateQueries`).
+   */
+  replayLost: boolean;
 }
 
 const INITIAL: ScanProgressState = {
@@ -46,6 +53,7 @@ const INITIAL: ScanProgressState = {
   classified: null,
   error: null,
   finished: false,
+  replayLost: false,
 };
 
 export function useScanEvents(baseUrl = ''): ScanProgressState & { reset: () => void } {
@@ -151,6 +159,14 @@ export function useScanEvents(baseUrl = ''): ScanProgressState & { reset: () => 
       }));
     };
 
+    const onReplayLost = () => {
+      // Bus emits this when the client reconnected with a Last-Event-ID
+      // older than the server's ring buffer. We can't tell what we missed
+      // — flag the state so callers (Dashboard) can refetch authoritative
+      // data and discard whatever local progress we'd accumulated.
+      setState((s) => ({ ...s, replayLost: true }));
+    };
+
     es.addEventListener('phase', onPhase);
     es.addEventListener('discovered', onDiscovered);
     es.addEventListener('hashed', onHashed);
@@ -158,6 +174,7 @@ export function useScanEvents(baseUrl = ''): ScanProgressState & { reset: () => 
     es.addEventListener('done', onDone);
     es.addEventListener('aborted', onAborted);
     es.addEventListener('failed', onFailed);
+    es.addEventListener('replay_lost', onReplayLost);
 
     return () => {
       es.removeEventListener('phase', onPhase);
@@ -167,14 +184,21 @@ export function useScanEvents(baseUrl = ''): ScanProgressState & { reset: () => 
       es.removeEventListener('done', onDone);
       es.removeEventListener('aborted', onAborted);
       es.removeEventListener('failed', onFailed);
+      es.removeEventListener('replay_lost', onReplayLost);
       es.close();
       sourceRef.current = null;
     };
   }, [baseUrl]);
 
+  // Stable reference so consumers can use `reset` as a useEffect dep
+  // without retriggering on every render.
+  const reset = useCallback(() => {
+    setState((prev) => ({ ...INITIAL, connected: prev.connected }));
+  }, []);
+
   return {
     ...state,
-    reset: () => setState({ ...INITIAL, connected: state.connected }),
+    reset,
   };
 }
 
