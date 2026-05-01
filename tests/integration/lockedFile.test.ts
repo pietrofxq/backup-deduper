@@ -39,11 +39,18 @@ describe.skipIf(!isWindows)('quarantine — Windows-only locked-file handling', 
     return new Promise((resolve, reject) => {
       // PowerShell single-quoted strings need '' as escape for embedded '.
       const psPath = absPath.replace(/'/g, "''");
+      // FileShare.Read (not None): we want the mover's re-hash step to
+      // succeed (it opens for read) and the rename step to fail. Rename on
+      // Windows requires DELETE access on the file; with Share=Read only,
+      // no other process has DELETE, so MoveFileExW raises EBUSY/EPERM.
+      // FileShare.None would block the re-hash too, which short-circuits
+      // execution BEFORE the planned-action row is inserted — making the
+      // DB-side assertion vacuously fail.
       const script =
         `$f = [System.IO.File]::Open('${psPath}', ` +
         `[System.IO.FileMode]::Open, ` +
         `[System.IO.FileAccess]::Read, ` +
-        `[System.IO.FileShare]::None); ` +
+        `[System.IO.FileShare]::Read); ` +
         `Write-Host 'READY'; ` +
         `[Console]::In.ReadLine() | Out-Null; ` +
         `$f.Close();`;
@@ -130,11 +137,17 @@ describe.skipIf(!isWindows)('quarantine — Windows-only locked-file handling', 
       });
       // The locked file's action must be in the errored count, not silently skipped.
       expect(result.summary.errored).toBeGreaterThanOrEqual(1);
+      // The source must still exist on disk (the rename failed) — and the
+      // run as a whole must have completed without throwing past the loop.
+      expect(fs.existsSync(victim)).toBe(true);
+      // With FileShare.Read the re-hash succeeds and the planned-action row
+      // gets inserted before rename, so the failure path also lands an
+      // error message on the DB row. (FileShare.None would skip the row
+      // insertion at re-hash time — see the locker comment for why we use
+      // Read here.)
       const all = listAllActions(db, result.runId);
       const errored = all.filter((a) => a.error !== null);
       expect(errored.length).toBeGreaterThanOrEqual(1);
-      // The source must still exist on disk (the rename failed).
-      expect(fs.existsSync(victim)).toBe(true);
     } finally {
       db.client.close();
     }
