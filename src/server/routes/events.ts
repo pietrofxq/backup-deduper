@@ -1,6 +1,7 @@
 import type { ServerDeps } from '../index.js';
 import type { ZodApp } from '../types.js';
 import type { EventBus, ScanEvent } from '../events/bus.js';
+import { createBackpressuredWriter } from '../events/backpressure.js';
 
 const HEARTBEAT_INTERVAL_MS = 15_000;
 
@@ -35,7 +36,27 @@ export async function registerEventRoutes(app: ZodApp, deps: ServerDeps): Promis
     const lastEventIdHeader = req.headers['last-event-id'];
     const lastEventId = parseLastEventId(lastEventIdHeader);
 
-    const send = (event: ScanEvent): void => {
+    /**
+     * Backpressure / coalescing strategy.
+     *
+     * `reply.raw.write()` returns false when the kernel send buffer is
+     * full. Without paying attention to that signal, Node buffers writes
+     * in memory unboundedly — a slow client during a long scan emitting
+     * tens of thousands of `hashed` events could swell process RSS into
+     * the GBs.
+     *
+     * Logic lives in `backpressure.ts` so it can be unit-tested without a
+     * real socket. Defaults: `hashed` events coalesce (only the latest
+     * survives the pause); everything else queues in arrival order so
+     * state-changing frames (phase / done / aborted / failed) are never
+     * dropped.
+     */
+    const writer = createBackpressuredWriter({
+      writable: reply.raw,
+      serialize: frame,
+    });
+
+    function frame(event: ScanEvent): string {
       // Each frame: id, event, data — separated by \n, terminated by \n\n.
       // JSON is single-line so newlines in payload would break the wire format;
       // JSON.stringify guarantees no raw newlines in the output.
@@ -53,21 +74,28 @@ export async function registerEventRoutes(app: ZodApp, deps: ServerDeps): Promis
       } else if (event.data !== undefined) {
         envelope.value = event.data;
       }
-      reply.raw.write(
+      return (
         `id: ${event.id}\n` +
-          `event: ${event.type}\n` +
-          `data: ${JSON.stringify(envelope)}\n\n`,
+        `event: ${event.type}\n` +
+        `data: ${JSON.stringify(envelope)}\n\n`
       );
-    };
+    }
 
-    const unsubscribe = bus.subscribe(send, lastEventId);
+    const flushOnDrain = () => writer.onDrain();
+    reply.raw.on('drain', flushOnDrain);
+
+    const unsubscribe = bus.subscribe((event) => writer.send(event), lastEventId);
 
     const heartbeat = setInterval(() => {
       // Comment frames are valid SSE and do not invoke the client's onmessage.
+      // Skip when paused — the heartbeat is a liveness ping, not load-bearing
+      // data, and adding to the buffer while we're already backed up just
+      // makes the situation worse.
+      if (writer.isPaused()) return;
       try {
         reply.raw.write(`: heartbeat ${Date.now()}\n\n`);
       } catch {
-        // The socket may already be torn down — clean up on the close handler.
+        // Socket may be torn down between checks — cleanup handles it.
       }
     }, HEARTBEAT_INTERVAL_MS);
     // Don't keep the Node process alive for the heartbeat alone; the request
@@ -76,7 +104,9 @@ export async function registerEventRoutes(app: ZodApp, deps: ServerDeps): Promis
 
     const cleanup = () => {
       clearInterval(heartbeat);
+      reply.raw.removeListener('drain', flushOnDrain);
       unsubscribe();
+      writer.dispose();
     };
     req.raw.on('close', cleanup);
     req.raw.on('error', cleanup);

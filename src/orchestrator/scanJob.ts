@@ -152,6 +152,7 @@ export async function runScanJob(
       for (const p of paths) emptyDirs.push({ collectionId: cid, relPath: p });
     }
 
+    checkAbort();
     const cls = classifyAll({ preset, collections, files, emptyDirs });
 
     opts.onProgress?.({
@@ -161,8 +162,14 @@ export async function runScanJob(
       emptyDirs: cls.emptyDirActions.length,
     });
 
-    // Persist review pairs so the UI can act on them later.
+    // Persist review pairs so the UI can act on them later. Long enough on
+    // pathological datasets that we sample the abort signal periodically —
+    // a user who hit Cancel while we're churning through 50k pairs should
+    // see the run terminate within a handful of inserts, not after every
+    // pair has landed in the DB.
+    let i = 0;
     for (const p of cls.reviewPairs) {
+      if ((i++ & 0xff) === 0) checkAbort();
       insertReviewItem(db, {
         runId,
         basename: p.basename,
@@ -177,6 +184,7 @@ export async function runScanJob(
       });
     }
 
+    checkAbort();
     opts.onProgress?.({ type: 'phase', phase: 'report' });
     const sg = checkSanityGuard(db, cls.actions, {
       filesPctLimit: cfg.sanity_guard_files_pct,
@@ -227,6 +235,7 @@ export async function runScanJob(
       })),
     };
 
+    checkAbort();
     const reportPath = writeReport(targetRoot, report);
     appendAudit(targetRoot, 'scan_complete', {
       runId,
@@ -239,6 +248,10 @@ export async function runScanJob(
       reportPath,
     });
 
+    // Last gate before flipping the run to 'completed'. A cancel that
+    // races the post-classify, post-report path must still land as
+    // 'aborted' rather than 'completed'.
+    checkAbort();
     setRunStatus(db, runId, 'completed');
 
     opts.onProgress?.({ type: 'phase', phase: 'done' });
