@@ -221,6 +221,71 @@ describe('SSE — /api/events', () => {
     expect(phases).toEqual(expect.arrayContaining(['classify', 'done']));
   });
 
+  /**
+   * Reproducing UnreadableSubtreeError requires POSIX chmod (Windows ACLs
+   * differ and the runner usually has unrestricted access regardless), so
+   * the route-level "structured error → terminal SSE event" assertion
+   * lives here — gated to non-win32. The contract being verified: when
+   * runScanJob throws AFTER onRunCreated has fired, the route must
+   * publish 'failed' before the structured 4xx response goes out so the
+   * Dashboard's SSE channel can flip out of "scanning…" without polling.
+   */
+  it.skipIf(process.platform === 'win32' || process.getuid?.() === 0)(
+    'publishes a terminal failed event when scan throws UnreadableSubtreeError',
+    async () => {
+      // Build a tree where one subdirectory is unreadable so the scanner
+      // bubbles UnreadableSubtreeError. The error throws inside scanAll,
+      // *after* runScanJob's createRun + onRunCreated, exercising the
+      // post-onRunCreated branch the reviewer flagged.
+      const { bus, baseUrl, db } = await setup({
+        'Coll/visible.txt': 'hello',
+        'Coll/locked/secret.txt': 'nope',
+      });
+      syncCollectionsTable(db, root);
+      const c = listCollections(db).find((x) => x.rel_path === 'Coll');
+      if (!c) throw new Error('expected collection');
+      setPrimary(db, c.id);
+
+      // Subscribe to the bus directly — simpler and tighter than reading
+      // the SSE stream over HTTP, and the wire-shape of 'failed' is
+      // already covered by the happy-path test above.
+      const observed: Array<{ type: string; runId: number | null; data: unknown }> = [];
+      const unsub = bus.subscribe((e) =>
+        observed.push({ type: e.type, runId: e.runId, data: e.data }),
+      );
+
+      try {
+        // Make the locked subtree unreadable for the scanning user.
+        const lockedDir = `${root}/Coll/locked`;
+        const fs = await import('node:fs');
+        fs.chmodSync(lockedDir, 0o000);
+        try {
+          const res = await fetch(`${baseUrl}/api/scans`, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: '{}',
+          });
+          expect(res.status).toBe(409);
+          const body = await res.json();
+          expect(body.kind).toBe('unreadable_subtree');
+
+          const failed = observed.find((e) => e.type === 'failed');
+          expect(failed).toBeDefined();
+          expect(failed?.runId).toBeTypeOf('number');
+        } finally {
+          // Restore perms so cleanup can recurse.
+          try {
+            fs.chmodSync(lockedDir, 0o755);
+          } catch {
+            /* ignore */
+          }
+        }
+      } finally {
+        unsub();
+      }
+    },
+  );
+
   it('cancel route aborts an in-flight scan', async () => {
     // Build a tree large enough that the scan blocks on hashing for a tick.
     const files: Record<string, string> = {};

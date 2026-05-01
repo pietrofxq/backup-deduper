@@ -117,17 +117,34 @@ export async function registerScanRoutes(app: ZodApp, deps: ServerDeps): Promise
           report: result.report,
         };
       } catch (err) {
+        // Every error path that ran *after* the run row was created must
+        // emit a terminal SSE event so the Dashboard can flip out of the
+        // "scanning…" state. Aborted gets its own type; everything else is
+        // 'failed'. Errors that throw before onRunCreated (DryRunGateError
+        // and UnknownPresetError, which fire during config/preset loading)
+        // have no run id yet, so the publish is a no-op for them — we
+        // still call the helper rather than special-casing each branch.
+        const publishTerminal = (kind: 'aborted' | 'failed', payload: object) => {
+          if (registeredRunId === null) return;
+          events?.publish(kind, registeredRunId, payload);
+        };
+
         if (err instanceof ScanAbortedError) {
-          events?.publish('aborted', err.runId, { reason: 'cancelled by user' });
+          publishTerminal('aborted', { reason: 'cancelled by user' });
           return reply.code(409).send({
             error: err.message,
             kind: 'aborted',
           });
         }
+        const failedPayload = {
+          error: err instanceof Error ? err.message : String(err),
+        };
         if (err instanceof DryRunGateError) {
+          publishTerminal('failed', failedPayload);
           return reply.code(400).send({ error: err.message, kind: 'dry_run_gate' });
         }
         if (err instanceof UnreadableSubtreeError) {
+          publishTerminal('failed', failedPayload);
           return reply.code(409).send({
             error: err.message,
             kind: 'unreadable_subtree',
@@ -138,13 +155,10 @@ export async function registerScanRoutes(app: ZodApp, deps: ServerDeps): Promise
           });
         }
         if (err instanceof UnknownPresetError) {
+          publishTerminal('failed', failedPayload);
           return reply.code(404).send({ error: err.message, kind: 'unknown_preset' });
         }
-        if (registeredRunId !== null) {
-          events?.publish('failed', registeredRunId, {
-            error: err instanceof Error ? err.message : String(err),
-          });
-        }
+        publishTerminal('failed', failedPayload);
         throw err;
       } finally {
         if (registeredRunId !== null) events?.unregisterCancellable(registeredRunId);
