@@ -175,6 +175,66 @@ Each UI milestone follows the same shape: scaffolding → page → wiring → te
 
 ---
 
+## Pre-ship hardening (M14–M18)
+
+Surfaced by the docs structure pass; see [`docs/known-gaps.md`](./docs/known-gaps.md) for the full triage. These are sequenced **before** M13 (ship-to-real-data) because each closes a hole that becomes visible the moment the tool runs against the user's actual `E:\` data.
+
+### ✅ M14. Documentation drift cleanup
+
+Closed in PR `docs/ai-context-structure`. The seven doc/code drift items catalogued in [`docs/known-gaps.md`](./docs/known-gaps.md) §"Documentation drift" are all addressed:
+
+- ✅ **D-1 pino / app.log.** README/PLAN updated to name the actual logger (Fastify default → stdout) and `audit.jsonl` as the persistent structured log. The `pino` direct dependency is left in `package.json` for now (Fastify pulls it in transitively; deleting the direct entry is a no-op for runtime behavior).
+- ✅ **D-2 weekly DB snapshots.** Claim removed from both README and PLAN. Re-add only if/when the snapshot job ships.
+- ✅ **D-3 config.json.** Removed from README's layout, removed from PLAN's runtime layout, and removed from the README first-run protocol. Config is in the SQLite `config` table.
+- ✅ **D-4 migration filename.** PLAN's critical-files list now references `0000_initial.sql`.
+- ✅ **D-5 README "not yet implemented" framing.** Rewritten to reflect the M11-shipped reality; "How to run" section updated with the actual `npm` scripts.
+- ✅ **D-6 embedded HTML fallback.** README layout no longer references the embedded fallback; full code-side removal stays under M13 (ship-to-real-data).
+- ✅ **D-7 AGENTS.md "five files".** Section renamed; PLAN's canonical list updated to enumerate every safety-critical file with a one-line note each.
+
+### ⬜ M15. Sanity guard fail-closed without primary
+
+Today, [`src/orchestrator/sanityGuard.ts`](./src/orchestrator/sanityGuard.ts) returns `passed: true` vacuously when no primary collection is set — see [`docs/known-gaps.md`](./docs/known-gaps.md) item SG-1. **A `target_root` with no primary has zero sanity-guarding.**
+
+Fix:
+
+- Refuse the run with a structured error (`SanityGuardError` with `reason: 'no_primary_set'`) when `getPrimary(db)` returns null and the run is not a no-op.
+- Surface in the UI: dashboard warns "no primary set — quarantine disabled" until the user marks one.
+- Add a unit + contract test that the no-primary case **fails closed**.
+
+### ⬜ M16. Persist `runStore` to disk
+
+ROADMAP backlog #21, promoted. The in-memory cache means a server restart between scan and quarantine forces a re-scan (15–25 minutes on the user's 155 GB dataset). For real-world ergonomics:
+
+- Serialize `actions[]` and `emptyDirActions[]` as a typed JSON sidecar at `<target_root>/.dedupe/reports/<runId>-actions.json`.
+- On `POST /api/quarantine/run` cache miss, fall back to loading from the sidecar before 404'ing.
+- Honor sidecar TTL (e.g. 7 days; a much-older scan should be invalidated).
+- Update [`docs/decisions/0008-in-memory-runStore.md`](./docs/decisions/0008-in-memory-runStore.md) to "Superseded by 0011".
+
+### ⬜ M17. Audit-page surface for errored actions
+
+ROADMAP backlog #7, promoted. When `tryRestore` fails or any action is stranded with `error` set, surface them in the audit UI — today they're invisible to reconcile (rows have `error` set, but the UI doesn't filter for them).
+
+- Add an `errored` filter to `/api/audit`'s `state` enum.
+- Add a red badge in the AuditLog page's state column.
+- Add a contract test asserting an `error`-bearing row appears under that filter.
+
+### ⬜ M18. Path-prefix anchoring
+
+ROADMAP backlog #11, promoted. `path_prefix` cruft/whitelist patterns are matched with raw `startsWith` — `Android/data` over-matches `Android/database/foo`. Risk: silent over-classification.
+
+- Enforce in the preset zod schema: `path_prefix` patterns must end with `/` (or be matched against `/`-delimited segments).
+- Migration: scan all existing presets for offending patterns; rewrite or surface a warning.
+- Update [`docs/classifier.md`](./docs/classifier.md) and [`docs/workflows/adding-a-preset.md`](./docs/workflows/adding-a-preset.md) §"anti-patterns" once the schema enforces it.
+
+### ⬜ M19. Mover-side hashing on a worker
+
+ROADMAP backlog #13 today covers the scanner pool only. The mover (`quarantine.ts:146`, `restore.ts:90`, `reconcile.ts:98`) calls `hashFileSync` on every action. For multi-GB files this stalls SSE and request handling — not blocking for the user's 155 GB dataset (median file size is small) but worth measuring under M13's manual verification.
+
+- Move `hashFileSync` to a `worker_threads` pool so the event loop stays responsive during quarantine of large files.
+- Profile first; defer the change if median quarantine wall-clock is acceptable.
+
+---
+
 ## Suggestion backlog from the post-implementation code review
 
 These are the non-blocking items the M7 hardening pass surfaced. Tagged with the milestone where they should ship.

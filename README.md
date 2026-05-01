@@ -2,7 +2,7 @@
 
 A safety-first, general-purpose deduplication tool for collections of files in a directory tree. Designed initially for Samsung phone backups but works on any folder.
 
-**Status:** Not yet implemented. Design is locked in [PLAN.md](./PLAN.md). Milestones in [ROADMAP.md](./ROADMAP.md).
+**Status:** v1 is implemented through M11 (engine + API + SSE progress + Quarantine/Audit/Review pages). The type-to-confirm UI polish (M12) and ship-to-real-data (M13) are the remaining milestones. Design is locked in [PLAN.md](./PLAN.md); milestones and progress in [ROADMAP.md](./ROADMAP.md). For AI-context lookup of architecture, schema, API, and ADRs, see [docs/](./docs/).
 
 ## What it does
 
@@ -41,9 +41,10 @@ The headline invariant — *for any scan + classify + quarantine sequence (no pu
 - **Server:** `fastify` 5 + `zod` 4
 - **UI:** `react` 19 + `vite` 6 + `tailwind` 4 + `@tanstack/react-query` + `@tanstack/react-table`
 - **Hashing:** built-in `crypto.createHash('sha256')` (no third-party hash lib)
+- **Logging:** Fastify's default logger to stdout. Persistent records go to `<target_root>/.dedupe/audit.jsonl` (append-only JSONL).
 - **Tests:** `vitest` 2 + `fast-check` 3, plus Fastify's `.inject()` for in-process API contract tests
 
-Deliberately not used: Electron, Drizzle/Prisma, chokidar, fs-extra, third-party glob libraries, Playwright (see Testing strategy). Each is a vector for "did something I didn't expect" surprises in a safety-critical tool.
+Deliberately not used: Electron, Prisma, chokidar, fs-extra, third-party glob libraries beyond fast-glob, Playwright in the main matrix (one targeted Playwright test lands with M12 — see Testing strategy). Each is a vector for "did something I didn't expect" surprises in a safety-critical tool. Drizzle is used for the schema + typed query builder ([docs/decisions/](./docs/decisions/) for the rationale on each pick).
 
 ## Testing strategy
 
@@ -70,10 +71,8 @@ CI matrix: Linux + macOS + Windows. Property test at `numRuns: 50` per platform.
 ├─ .dedupe/                          hidden; tool state, travels with the data
 │  ├─ target-id.txt                  the sentinel UUID
 │  ├─ state.db / state.db-wal / state.db-shm
-│  ├─ state.db.backup-YYYY-MM-DD     weekly snapshot, keep last 4
-│  ├─ audit.jsonl                    append-only
-│  ├─ app.log
-│  └─ config.json
+│  ├─ audit.jsonl                    append-only structured log
+│  └─ reports/<runId>.json           dry-run reports, one per scan
 └─ .dedupe-trash/                    hidden; quarantine
    └─ <ISO-timestamp>-run-<id>/
       └─ <collection-name>/<original-relative-path>/<file>
@@ -81,16 +80,16 @@ CI matrix: Linux + macOS + Windows. Property test at `numRuns: 50` per platform.
 
 `.dedupe/` is dot-prefixed (POSIX-hidden by default). On Windows the tool also sets the hidden attribute (`attrib +H`) on first creation.
 
-## How to run (once implemented)
-
-Not runnable yet. Once implemented:
+## How to run
 
 ```
 npm install
-npm run build:web         # builds the React bundle Fastify will serve
-TARGET_ROOT=E:\ npm start # opens http://localhost:7777
-npm test                  # unit + integration + contract + property
-npm run test:thorough     # property test at numRuns=500
+npm run build && npm run build:web         # build server + React bundle
+TARGET_ROOT=E:\ npm start                  # opens http://localhost:7777
+# or, for development with auto-reload:
+TARGET_ROOT=/path/to/test-data npm run dev # Fastify + Vite concurrently
+npm test                                   # unit + integration + contract + property
+npm run test:thorough                      # safety-invariant property test at numRuns=500
 ```
 
 First-run flow:
@@ -106,7 +105,7 @@ First-run flow:
 
 1. Make a separate physical-drive backup of any irreplaceable data (the user is doing this for `Backup s22/` + `Backup s24/`).
 2. Copy the source folders to a sandbox path inside `target_root` (e.g. `<target_root>/test-collection/`).
-3. Set `target_root` to the sandbox path in `<target_root>/.dedupe/config.json` or via the UI.
+3. Set `target_root` to the sandbox path via the UI (or `TARGET_ROOT` env var on the next launch). Config lives in the SQLite `config` table — there is no `config.json`.
 4. Run unit + integration + contract + property suite (`npm test`); the safety-invariant property test must pass at `numRuns: 50` minimum.
 5. Run dry-run + real-mode + restore + conflict-restore against the sandbox.
 6. Only then change `target_root` to the real location and run against real folders, starting again with a dry-run.
