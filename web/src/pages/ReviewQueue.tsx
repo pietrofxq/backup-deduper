@@ -58,7 +58,7 @@ export function ReviewQueuePage() {
     mutationFn: (id: number) => api.decideReview(id, 'kept_both'),
     onSuccess: () => {
       setError(null);
-      qc.invalidateQueries({ queryKey: ['review'] });
+      qc.invalidateQueries({ queryKey: keys.reviewRoot() });
     },
     onError: (err) => {
       setError(err instanceof ApiError ? err.message : 'Decision failed');

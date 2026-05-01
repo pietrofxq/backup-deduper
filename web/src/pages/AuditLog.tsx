@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { ClipboardList, Download, Filter, RefreshCw, X } from 'lucide-react';
 import {
@@ -70,6 +70,18 @@ export function AuditLogPage() {
   const reasonOptions = audit.data?.reasons ?? [];
   const total = audit.data?.total ?? 0;
   const items = audit.data?.items ?? [];
+
+  // Clamp the page index against the latest known total. The dataset can
+  // shrink under us — concurrent purge/restore, or just a narrower filter —
+  // and without clamping, the user would see a misleadingly empty table on
+  // an out-of-range page. We sync state too so a later refetch that grows
+  // the dataset doesn't snap back to a stale page index.
+  const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  const safePage = audit.data ? Math.min(page, pageCount - 1) : page;
+
+  useEffect(() => {
+    if (page !== safePage) setPage(safePage);
+  }, [page, safePage]);
 
   const columns = useMemo<ColumnDef<QuarantineAction>[]>(
     () => [
@@ -219,8 +231,6 @@ export function AuditLogPage() {
     downloadCsv('audit.csv', lines.join('\n'));
   }
 
-  const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE));
-
   return (
     <div className="space-y-6">
       <Header
@@ -351,7 +361,7 @@ export function AuditLogPage() {
             }
           />
           <Pagination
-            page={page}
+            page={safePage}
             pageCount={pageCount}
             pageSize={PAGE_SIZE}
             total={total}

@@ -378,7 +378,9 @@ describe('API — scan + quarantine + restore', () => {
     expect(all.offset).toBe(0);
     expect(Array.isArray(all.reasons)).toBe(true);
     expect(all.total).toBeGreaterThan(0);
-    expect(all.items.length).toBe(all.total);
+    // The default page is `limit=100`. Asserting `items.length === total`
+    // would silently break once the audit table grows past that limit.
+    expect(all.items.length).toBe(Math.min(all.total, all.limit));
 
     // Filter by an existing reason — items should all match it; total
     // matches the count for that reason. `total` is the pre-paged count.
@@ -464,7 +466,7 @@ describe('API — scan + quarantine + restore', () => {
       ).body,
     );
     expect(filtered.total).toBeGreaterThan(0);
-    expect(filtered.items.length).toBe(filtered.total);
+    expect(filtered.items.length).toBe(Math.min(filtered.total, filtered.limit));
   });
 });
 

@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { ColumnDef, SortState } from '../components/DataTable.js';
 import { csvEscape, downloadCsv } from '../lib/csv.js';
 
@@ -76,6 +76,13 @@ export function useTable<T>({
 
   const pageCount = Math.max(1, Math.ceil(sorted.length / pageSize));
   const safePage = Math.min(page, pageCount - 1);
+
+  // Re-sync internal state when the dataset shrinks so the user doesn't
+  // get jumped back to a stale page index if rows are appended later.
+  useEffect(() => {
+    if (page !== safePage) setPage(safePage);
+  }, [page, safePage]);
+
   const paginated = useMemo(
     () => sorted.slice(safePage * pageSize, (safePage + 1) * pageSize),
     [sorted, safePage, pageSize],
