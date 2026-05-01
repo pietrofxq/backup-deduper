@@ -113,6 +113,19 @@ export const QuarantineActionRow = z.object({
   error: z.string().nullable(),
 });
 
+/**
+ * Paginated `/audit` response. `reasons` is the distinct set of reason values
+ * across the table (unfiltered) so the UI can render the filter dropdown
+ * without a second round-trip.
+ */
+export const AuditPageResponse = z.object({
+  items: z.array(QuarantineActionRow),
+  total: z.number().int().nonnegative(),
+  limit: z.number().int().positive(),
+  offset: z.number().int().nonnegative(),
+  reasons: z.array(z.string()),
+});
+
 export const QuarantineSummary = z.object({
   attempted: z.number().int(),
   executed: z.number().int(),

@@ -109,7 +109,15 @@ export function createApiClient(opts: ApiClientOptions = {}) {
 
     listQuarantine: (runId?: number) =>
       request<QuarantineAction[]>('GET', '/quarantine', undefined, { runId }),
-    listAudit: () => request<QuarantineAction[]>('GET', '/audit'),
+    listAudit: (params: AuditQuery = {}) =>
+      request<AuditPageResponse>('GET', '/audit', undefined, {
+        runId: params.runId,
+        reason: params.reason,
+        after: params.after,
+        before: params.before,
+        limit: params.limit,
+        offset: params.offset,
+      }),
     runQuarantine: (scanRunId: number, ignoreSanityGuard?: boolean) =>
       request<QuarantineRunResponse>('POST', '/quarantine/run', {
         scanRunId,
@@ -251,6 +259,26 @@ export interface QuarantineAction {
   restored_at: string | null;
   purged_at: string | null;
   error: string | null;
+}
+
+export interface AuditQuery {
+  runId?: number;
+  reason?: string;
+  /** Inclusive lower bound on `planned_at`. SQLite datetime / ISO date string. */
+  after?: string;
+  /** Inclusive upper bound on `planned_at`. */
+  before?: string;
+  limit?: number;
+  offset?: number;
+}
+
+export interface AuditPageResponse {
+  items: QuarantineAction[];
+  total: number;
+  limit: number;
+  offset: number;
+  /** Distinct reason values across the whole audit table — for the filter dropdown. */
+  reasons: string[];
 }
 
 export interface QuarantineRunResponse {

@@ -113,13 +113,20 @@ Each UI milestone follows the same shape: scaffolding → page → wiring → te
   - Backlog #21 (scan results held in memory; lost on restart) — bigger refactor; defer to M11.
   - Backlog #22 (`listAllActions` 1k-row cap, `/audit` truncation) — defer to M10 when the Audit page lands.
 
-### ⬜ M10. Quarantine + Audit Log + Review Queue pages
+### ✅ M10. Quarantine + Audit Log + Review Queue pages
 
-- **Quarantine.** TanStack Table over `/api/quarantine`. Columns: collection, rel-path, reason, size, planned/executed timestamps. Per-row "Restore" button (calls `POST /api/quarantine/restore`); bulk restore via row selection. "Purge eligible" button surfaces a dry-run summary first, then a second click to actually purge.
-- **AuditLog.** TanStack Table over `/api/audit`. Filter by reason, run id, date range. Includes purged + restored rows so the full history is visible. Read-only.
-- **ReviewQueue.** TanStack Table over `/api/review?status=open`. Each row shows the basename, the two paths + sha prefixes + sizes. Decision buttons: "Keep both" only for v1 (the API rejects `quarantined_a/b` until M13 wires the side-quarantine flow). The button shows a tooltip explaining what "Keep both" does.
-- All three pages share a `useTable` hook that handles pagination, column visibility, and CSV export.
-- **Tests added:** `Quarantine.test.tsx`, `AuditLog.test.tsx`, `ReviewQueue.test.tsx` (each: render with mocked data, exercise filter + sort + a primary action; assert the API mock is called correctly).
+- ✅ **Quarantine.** Table over `/api/quarantine`. Columns: collection, rel-path, reason, size, planned/executed timestamps. Per-row Restore + bulk Restore via row selection. Purge eligible runs a dry-run preview banner first, then a second click confirms. CSV export and a refresh button on the page header.
+- ✅ **AuditLog.** Server-side paginated table over `/api/audit`. Filters: run id, reason (dropdown populated from the response's `reasons` array), date range (after/before on `planned_at`). State-column badges distinguish quarantined / restored / purged / errored. Read-only.
+- ✅ **ReviewQueue.** Table over `/api/review?status=open|kept_both|all`. Each row shows the basename plus both sides' (collection, rel-path, sha-prefix, size). Only "Keep both" is wired (v1) — the page surfaces an explainer about the Phase 2 side-quarantine flow.
+- ✅ **`useTable` hook + `<DataTable>` primitive.** Hand-rolled (no `@tanstack/react-table` dep) — handles sort, pagination, row selection, CSV export. Quarantine + ReviewQueue use it; AuditLog reuses sort + columns but pages server-side. Reasoning: the surface needed is small enough that a new dep is more friction than help, and the column descriptors stay identical to TanStack Table's shape so a swap later is mechanical.
+- ⛔ **Deviation:** the milestone said "TanStack Table on each page". We hand-rolled instead because the working set was modest (sort + paginate + select + CSV). The `ColumnDef<T>` shape mirrors TanStack Table's API so a swap is a mechanical lift if a real-data dataset ever motivates one.
+- ✅ **Backlog item closed in this milestone:**
+  - #22 (`listAllActions` 1k-row cap, `/audit` truncation) — replaced with `listAuditPage(db, filters, limit, offset)` returning `{items, total, limit, offset}`. Route gained `runId`, `reason`, `after`, `before`, `limit`, `offset` query params plus a `reasons` array in the response (distinct values, unfiltered, used by the UI dropdown without a second round-trip). Wire-shape change is breaking; the apiClient + contract test were updated together.
+- ✅ **Routing.** `/quarantine`, `/audit`, `/review` are no longer "soon" placeholders — un-pended in `Layout.tsx`'s nav and registered in `router.tsx`.
+- ✅ **Tests added:**
+  - Web: `Quarantine.test.tsx` (5 cases: render, single restore, bulk restore via select-all, purge dry-run → confirm flow, sort toggle), `AuditLog.test.tsx` (5 cases: render, reason filter triggers refetch, runId filter, clear button resets, Next advances offset), `ReviewQueue.test.tsx` (3 cases: open-only by default, Keep both calls decideReview, status filter refetches).
+  - Server: `tests/contract/api.test.ts` gained one test exercising `/audit`'s paginated envelope (items/total/limit/offset/reasons), reason filter, limit/offset pagination, and unknown-runId zero-result behavior.
+  - Final tally: **111 server tests, 31 web tests — all green.**
 
 ### ⬜ M11. SSE progress + locked-file / long-path test gaps
 
@@ -169,7 +176,7 @@ These are the non-blocking items the M7 hardening pass surfaced. Tagged with the
 | 18 | `src/db/index.ts:18-21` | Document that `db.q` is canonical; `db.client` is escape hatch | M11 |
 | 20 | `src/db/queries.ts` | One-second `executed_at` precision; switch to `strftime('%Y-%m-%dT%H:%M:%fZ', 'now')` | M11 |
 | 21 | `src/orchestrator/runStore.ts` | Scan results held only in memory — lost on server restart; persist to DB or JSON sidecar | M9 |
-| 22 | `src/db/queries.ts:458` | `listAllActions` capped at 1000 rows with no pagination; `/audit` silently truncates | M10 |
+| 22 | `src/db/queries.ts:458` | `listAllActions` capped at 1000 rows with no pagination; `/audit` silently truncates | ✅ M10 — replaced with `listAuditPage` (filters + offset/limit) |
 | 23 | `src/server/routes/*.ts` | Missing response schemas on ~8 routes; internal DB column names could leak, no OpenAPI generation | M8 |
 | 24 | `src/server/routes/scans.ts:77` | `POST /quarantine/run` registered in `scans.ts` — move to `quarantine.ts` | M8 |
 | 25 | `src/mover/quarantine.ts:143` | Cruft files with null hashes skip re-verification entirely (TOCTOU risk) — document as known limitation | M11 |
