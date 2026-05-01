@@ -8,6 +8,7 @@ import { registerPresetRoutes } from './presets.js';
 import { registerScanRoutes } from './scans.js';
 import { registerReviewRoutes } from './review.js';
 import { registerQuarantineRoutes } from './quarantine.js';
+import { registerEventRoutes } from './events.js';
 import { registerStaticUi } from '../static.js';
 
 /**
@@ -28,6 +29,7 @@ export async function registerRoutes(app: ZodApp, deps: ServerDeps): Promise<voi
       await registerScanRoutes(typed, deps);
       await registerReviewRoutes(typed, deps);
       await registerQuarantineRoutes(typed, deps);
+      await registerEventRoutes(typed, deps);
     },
     { prefix: '/api' },
   );

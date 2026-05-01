@@ -8,12 +8,19 @@ import * as schema from './schema.js';
 
 /**
  * Public DB type. Wraps the better-sqlite3 client and the typed Drizzle
- * builder side-by-side. Direct client access is preserved for hand-tuned
- * statements (e.g. `db.client.prepare(...)`); typed queries use `db.q.*`.
+ * builder side-by-side.
  *
- * Drizzle is wrapped over the same connection — there is no second handle
- * and no separate transaction context, so `db.client.transaction` and
- * `db.q.transaction` are the same SQLite session.
+ * Use `db.q` for everything by default — every query in `src/db/queries.ts`
+ * goes through it and gets type-checked column names plus typed result rows.
+ *
+ * `db.client` is the lower-level escape hatch. Reach for it only when:
+ *   - running raw `client.exec(...)` for migrations,
+ *   - calling `client.pragma(...)`,
+ *   - or hand-rolling a prepared statement that Drizzle can't express.
+ *
+ * Both fields share the same underlying SQLite connection — there is no
+ * second handle and no separate transaction context, so `db.client.transaction`
+ * and `db.q.transaction` are the same SQLite session.
  */
 export interface Db {
   client: Database.Database;
@@ -35,7 +42,12 @@ export function openDb(targetRoot: string, opts: OpenDbOptions = {}): Db {
   const client = new Database(dbPath);
   client.pragma('journal_mode = WAL');
   client.pragma('foreign_keys = ON');
-  client.pragma('synchronous = NORMAL');
+  // synchronous=FULL adds an extra fsync per commit so a kernel panic /
+  // power loss in the middle of a transaction can't corrupt the WAL.
+  // The throughput cost is negligible for our workload (a few hundred
+  // commits per scan, no bulk-insert hot paths) and the safety dividend
+  // is essential for a tool that mediates destructive moves.
+  client.pragma('synchronous = FULL');
   const q = drizzle(client, { schema });
   return { client, q };
 }

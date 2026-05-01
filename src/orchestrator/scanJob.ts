@@ -27,6 +27,23 @@ export interface ScanJobOptions {
   ignoreSanityGuard?: boolean;
   /** Optional progress callback. */
   onProgress?: (event: ScanJobProgressEvent) => void;
+  /**
+   * Optional cancellation signal. The scanner polls between hashed files.
+   * On abort the run row is marked `aborted` and ScanAbortedError is thrown.
+   */
+  signal?: AbortSignal;
+  /**
+   * Called once the run row exists (so the route can register the run id with
+   * the cancel registry before the long-running work begins).
+   */
+  onRunCreated?: (runId: number) => void;
+}
+
+export class ScanAbortedError extends Error {
+  constructor(public readonly runId: number) {
+    super(`Scan run #${runId} aborted by user`);
+    this.name = 'ScanAbortedError';
+  }
 }
 
 export type ScanJobProgressEvent =
@@ -109,13 +126,23 @@ export async function runScanJob(
     dryRun,
     ignoreSanityGuard: !!opts.ignoreSanityGuard,
   });
+  opts.onRunCreated?.(runId);
+
+  const checkAbort = () => {
+    if (opts.signal?.aborted) {
+      throw new ScanAbortedError(runId);
+    }
+  };
 
   try {
     opts.onProgress?.({ type: 'phase', phase: 'scan' });
+    checkAbort();
     const scan: ScanSummary = await scanAll(db, targetRoot, runId, {
       onProgress: opts.onProgress,
+      signal: opts.signal,
     });
 
+    checkAbort();
     opts.onProgress?.({ type: 'phase', phase: 'classify' });
     const collections = listCollections(db);
     const files = listAllLiveFiles(db);
@@ -125,6 +152,7 @@ export async function runScanJob(
       for (const p of paths) emptyDirs.push({ collectionId: cid, relPath: p });
     }
 
+    checkAbort();
     const cls = classifyAll({ preset, collections, files, emptyDirs });
 
     opts.onProgress?.({
@@ -134,8 +162,14 @@ export async function runScanJob(
       emptyDirs: cls.emptyDirActions.length,
     });
 
-    // Persist review pairs so the UI can act on them later.
+    // Persist review pairs so the UI can act on them later. Long enough on
+    // pathological datasets that we sample the abort signal periodically —
+    // a user who hit Cancel while we're churning through 50k pairs should
+    // see the run terminate within a handful of inserts, not after every
+    // pair has landed in the DB.
+    let i = 0;
     for (const p of cls.reviewPairs) {
+      if ((i++ & 0xff) === 0) checkAbort();
       insertReviewItem(db, {
         runId,
         basename: p.basename,
@@ -150,6 +184,7 @@ export async function runScanJob(
       });
     }
 
+    checkAbort();
     opts.onProgress?.({ type: 'phase', phase: 'report' });
     const sg = checkSanityGuard(db, cls.actions, {
       filesPctLimit: cfg.sanity_guard_files_pct,
@@ -200,6 +235,7 @@ export async function runScanJob(
       })),
     };
 
+    checkAbort();
     const reportPath = writeReport(targetRoot, report);
     appendAudit(targetRoot, 'scan_complete', {
       runId,
@@ -212,6 +248,10 @@ export async function runScanJob(
       reportPath,
     });
 
+    // Last gate before flipping the run to 'completed'. A cancel that
+    // races the post-classify, post-report path must still land as
+    // 'aborted' rather than 'completed'.
+    checkAbort();
     setRunStatus(db, runId, 'completed');
 
     opts.onProgress?.({ type: 'phase', phase: 'done' });
@@ -225,6 +265,16 @@ export async function runScanJob(
       reportPath,
     };
   } catch (err) {
+    // The scanner throws the AbortSignal's `reason` directly when cancelled
+    // mid-walk — re-classify any error that lands in our catch with an
+    // already-tripped signal as an abort, not a failure. This keeps the
+    // run row's terminal status honest (`aborted` vs `failed`) regardless of
+    // which loop body caught the signal first.
+    if (err instanceof ScanAbortedError || opts.signal?.aborted) {
+      setRunStatus(db, runId, 'aborted');
+      appendAudit(targetRoot, 'scan_aborted', { runId });
+      throw err instanceof ScanAbortedError ? err : new ScanAbortedError(runId);
+    }
     setRunStatus(db, runId, 'failed');
     appendAudit(targetRoot, 'scan_failed', {
       runId,

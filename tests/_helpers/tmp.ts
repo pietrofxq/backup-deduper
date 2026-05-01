@@ -34,7 +34,6 @@ export function rmRf(dir: string): void {
         if (isWindows) {
           // Last-resort: leak the dir rather than fail the suite. Windows test
           // runners clean %TEMP% between runs anyway.
-          // eslint-disable-next-line no-console
           console.warn(`rmRf: giving up on ${dir} (${code}) after ${maxAttempts} attempts`);
           return;
         }

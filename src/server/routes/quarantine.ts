@@ -10,6 +10,7 @@ import { bulkRestore } from '../../mover/restore.js';
 import { purge } from '../../mover/purge.js';
 import { loadConfig } from '../../config/loader.js';
 import { getScanResult } from '../../orchestrator/runStore.js';
+import { withMutationLock } from '../../orchestrator/mutex.js';
 import {
   DryRunGateError,
   runQuarantineJob,
@@ -112,14 +113,16 @@ export async function registerQuarantineRoutes(
         });
       }
       try {
-        return runQuarantineJob({
-          db: deps.db,
-          targetRoot: deps.targetRoot,
-          scanRunId: req.body.scanRunId,
-          actions: cached.actions,
-          emptyDirs: cached.emptyDirActions,
-          ignoreSanityGuard: req.body.ignoreSanityGuard ?? false,
-        });
+        return await withMutationLock(() =>
+          runQuarantineJob({
+            db: deps.db,
+            targetRoot: deps.targetRoot,
+            scanRunId: req.body.scanRunId,
+            actions: cached.actions,
+            emptyDirs: cached.emptyDirActions,
+            ignoreSanityGuard: req.body.ignoreSanityGuard ?? false,
+          }),
+        );
       } catch (err) {
         if (err instanceof DryRunGateError) {
           return reply.code(400).send({ error: err.message, kind: 'dry_run_gate' });
@@ -143,12 +146,14 @@ export async function registerQuarantineRoutes(
       },
     },
     async (req) =>
-      bulkRestore({
-        db: deps.db,
-        targetRoot: deps.targetRoot,
-        actionIds: req.body.actionIds,
-        allowSidecar: req.body.allowSidecar,
-      }),
+      withMutationLock(() =>
+        bulkRestore({
+          db: deps.db,
+          targetRoot: deps.targetRoot,
+          actionIds: req.body.actionIds,
+          allowSidecar: req.body.allowSidecar,
+        }),
+      ),
   );
 
   app.post(
@@ -161,12 +166,14 @@ export async function registerQuarantineRoutes(
     },
     async (req) => {
       const cfg = loadConfig(deps.db);
-      return purge({
-        db: deps.db,
-        targetRoot: deps.targetRoot,
-        retentionDays: cfg.retention_days,
-        dryRun: req.body?.dryRun ?? true,
-      });
+      return withMutationLock(() =>
+        purge({
+          db: deps.db,
+          targetRoot: deps.targetRoot,
+          retentionDays: cfg.retention_days,
+          dryRun: req.body?.dryRun ?? true,
+        }),
+      );
     },
   );
 }

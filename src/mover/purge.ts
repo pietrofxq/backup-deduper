@@ -75,13 +75,34 @@ export function purge(opts: PurgeOptions): PurgeSummary {
       // FS) instead of a startsWith on resolved absolutes; otherwise drive-
       // letter casing variance on Windows would make legitimate paths fail
       // the fence (or, worse, an attacker-controlled casing could pass it).
-      const abs = path.resolve(dest);
-      const trashAbs = path.resolve(trashDir);
+      //
+      // Defend against symlink injection: if a previous bug or a user with
+      // shell access placed a symlink under .dedupe-trash/ that points to a
+      // file outside the trash, `unlinkSync(dest)` would happily follow the
+      // path resolution rules. Resolve both sides through `fs.realpathSync`
+      // before comparing — otherwise platforms whose tmpdir is itself a
+      // symlink (macOS's `/var → /private/var`) would fail every legitimate
+      // path with a false-positive. ENOENT is fine — falls through to the
+      // unlink which will record it as already gone.
+      let abs: string;
+      try {
+        abs = fs.realpathSync(toLongPath(path.resolve(dest)));
+      } catch {
+        abs = path.resolve(dest);
+      }
+      let trashAbs: string;
+      try {
+        trashAbs = fs.realpathSync(toLongPath(path.resolve(trashDir)));
+      } catch {
+        trashAbs = path.resolve(trashDir);
+      }
       if (!isPathWithin(trashAbs, abs)) {
         appendAudit(targetRoot, 'purge_refused', {
           actionId: a.id,
           dest,
           reason: 'outside trashDir',
+          realPath: abs,
+          trashRealPath: trashAbs,
         });
         summary.errored += 1;
         continue;

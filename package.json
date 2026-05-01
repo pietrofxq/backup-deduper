@@ -21,7 +21,8 @@
     "seed": "tsx scripts/seed-test-data.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "typecheck:web": "npm --prefix web run typecheck",
-    "lint": "echo \"(no linter configured)\""
+    "lint": "eslint .",
+    "lint:web": "npm --prefix web run lint"
   },
   "dependencies": {
     "@fastify/cors": "^11.2.0",
@@ -35,13 +36,17 @@
     "zod": "^4.0.0"
   },
   "devDependencies": {
+    "@eslint/js": "^9.39.4",
     "@types/better-sqlite3": "^7.6.11",
     "@types/node": "^20.16.0",
     "concurrently": "^9.2.1",
     "drizzle-kit": "^0.31.10",
+    "eslint": "^9.39.4",
     "fast-check": "^3.22.0",
+    "globals": "^17.6.0",
     "tsx": "^4.19.0",
     "typescript": "^5.6.0",
+    "typescript-eslint": "^8.59.1",
     "vitest": "^2.1.0"
   }
 }

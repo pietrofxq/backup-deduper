@@ -392,11 +392,16 @@ export function insertPlannedAction(
 }
 
 export function markActionExecuted(db: Db, actionId: number): void {
+  // Sub-second precision via strftime — `datetime('now')` truncates to whole
+  // seconds, which means two actions executed in the same second tie on
+  // ordering. The reconcile path uses (executed_at, verified_at) to spot
+  // mid-flight crashes; identical timestamps mean we can't tell which side
+  // a crash happened on. The datetime parser already handles `.SSS`.
   db.q
     .update(s.quarantineAction)
     .set({
-      executedAt: sql`datetime('now')`,
-      verifiedAt: sql`datetime('now')`,
+      executedAt: sql`strftime('%Y-%m-%d %H:%M:%f', 'now')`,
+      verifiedAt: sql`strftime('%Y-%m-%d %H:%M:%f', 'now')`,
     })
     .where(eq(s.quarantineAction.id, actionId))
     .run();
