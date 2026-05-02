@@ -175,6 +175,96 @@ Each UI milestone follows the same shape: scaffolding → page → wiring → te
 
 ---
 
+## Pre-ship hardening (M14–M18)
+
+Surfaced by the docs structure pass; see [`docs/known-gaps.md`](./docs/known-gaps.md) for the full triage. These are sequenced **before** M13 (ship-to-real-data) because each closes a hole that becomes visible the moment the tool runs against the user's actual `E:\` data.
+
+### ✅ M14. Documentation drift cleanup
+
+Closed in PR `docs/ai-context-structure`. The seven doc/code drift items catalogued in [`docs/known-gaps.md`](./docs/known-gaps.md) §"Documentation drift" are all addressed:
+
+- ✅ **D-1 pino / app.log.** README/PLAN updated to name the actual logger (Fastify default → stdout) and `audit.jsonl` as the persistent structured log. The `pino` direct dependency is left in `package.json` for now (Fastify pulls it in transitively; deleting the direct entry is a no-op for runtime behavior).
+- ✅ **D-2 weekly DB snapshots.** Claim removed from both README and PLAN. Re-add only if/when the snapshot job ships.
+- ✅ **D-3 config.json.** Removed from README's layout, removed from PLAN's runtime layout, and removed from the README first-run protocol. Config is in the SQLite `config` table.
+- ✅ **D-4 migration filename.** PLAN's critical-files list now references `0000_initial.sql`.
+- ✅ **D-5 README "not yet implemented" framing.** Rewritten to reflect the M11-shipped reality; "How to run" section updated with the actual `npm` scripts.
+- ✅ **D-6 embedded HTML fallback.** README layout no longer references the embedded fallback; full code-side removal stays under M13 (ship-to-real-data).
+- ✅ **D-7 AGENTS.md "five files".** Section renamed; PLAN's canonical list updated to enumerate every safety-critical file with a one-line note each.
+
+### ⬜ M15. Sanity guard fail-closed without primary
+
+Today, [`src/orchestrator/sanityGuard.ts`](./src/orchestrator/sanityGuard.ts) returns `passed: true` vacuously when no primary collection is set — see [`docs/known-gaps.md`](./docs/known-gaps.md) item SG-1. **A `target_root` with no primary has zero sanity-guarding.**
+
+Fix:
+
+- Refuse the run with a structured error (`SanityGuardError` with `reason: 'no_primary_set'`) when `getPrimary(db)` returns null and the run is not a no-op.
+- Surface in the UI: dashboard warns "no primary set — quarantine disabled" until the user marks one.
+- Add a unit + contract test that the no-primary case **fails closed**.
+
+### ⬜ M16. Persist `runStore` to disk
+
+ROADMAP backlog #21, promoted. The in-memory cache means a server restart between scan and quarantine forces a re-scan (15–25 minutes on the user's 155 GB dataset). For real-world ergonomics:
+
+- Serialize `actions[]` and `emptyDirActions[]` as a typed JSON sidecar at `<target_root>/.dedupe/reports/<runId>-actions.json`.
+- On `POST /api/quarantine/run` cache miss, fall back to loading from the sidecar before 404'ing.
+- Honor sidecar TTL (e.g. 7 days; a much-older scan should be invalidated).
+- Update [`docs/decisions/0008-in-memory-runStore.md`](./docs/decisions/0008-in-memory-runStore.md) to "Superseded by 0011".
+
+### ⬜ M17. Audit-page surface for errored actions
+
+ROADMAP backlog #7, promoted. When `tryRestore` fails or any action is stranded with `error` set, surface them in the audit UI — today they're invisible to reconcile (rows have `error` set, but the UI doesn't filter for them).
+
+- Add an `errored` filter to `/api/audit`'s `state` enum.
+- Add a red badge in the AuditLog page's state column.
+- Add a contract test asserting an `error`-bearing row appears under that filter.
+
+### ⬜ M18. Path-prefix anchoring
+
+ROADMAP backlog #11, promoted. `path_prefix` cruft/whitelist patterns are matched with raw `startsWith` — `Android/data` over-matches `Android/database/foo`. Risk: silent over-classification.
+
+- Enforce in the preset zod schema: `path_prefix` patterns must end with `/` (or be matched against `/`-delimited segments).
+- Migration: scan all existing presets for offending patterns; rewrite or surface a warning.
+- Update [`docs/classifier.md`](./docs/classifier.md) and [`docs/workflows/adding-a-preset.md`](./docs/workflows/adding-a-preset.md) §"anti-patterns" once the schema enforces it.
+
+### ⬜ M19. Mover-side hashing on a worker
+
+ROADMAP backlog #13 today covers the scanner pool only. The mover (`quarantine.ts:146`, `restore.ts:90`, `reconcile.ts:98`) calls `hashFileSync` on every action. For multi-GB files this stalls SSE and request handling — not blocking for the user's 155 GB dataset (median file size is small) but worth measuring under M13's manual verification.
+
+- Move `hashFileSync` to a `worker_threads` pool so the event loop stays responsive during quarantine of large files.
+- Profile first; defer the change if median quarantine wall-clock is acceptable.
+
+### ⬜ M20. First-run install wizard
+
+A guided first-launch flow so the user never hits the "no primary set" footgun (which M15 makes fail-closed) and never has to know that "active preset" is a config key. Sequenced **after** M9 (which shipped the picker components), M12 (type-to-confirm pattern), and M15 (sanity-guard fail-closed safety net), and **before** M13 (ship-to-real-data) — the wizard is the de-facto first contact with real data.
+
+**Shape (chosen):** server-launched flow. The user keeps starting the tool with `TARGET_ROOT=…`; the wizard is purely the in-browser confirmation/picker step that runs on first connect. Rejected the in-app path-entry shape (would let an attacker who reaches `:7777` re-bind the sentinel/DB to a sensitive directory; not worth the safety surface vs. asking users to set the env var).
+
+Steps:
+
+- ⬜ **Wizard gate.** Add `wizard_completed_at: z.string().nullable().default(null)` to `ConfigSchema` ([src/config/schema.ts](./src/config/schema.ts)). Not gated — the wizard's `POST /api/wizard/complete` is the only writer. The `PUT /api/config` `.strict()` filter passes through non-gated keys, so no GATED_CONFIG_KEYS change.
+- ⬜ **First-run detection.** `GET /api/health` (or a new `GET /api/wizard/status`) returns `{ wizardRequired: boolean }` based on `wizard_completed_at === null` AND `getPrimary(db) === null`. The SPA's root route redirects to `/wizard` when `wizardRequired` is true.
+- ⬜ **`/wizard` page.** Four screens, single-page-stack; back/next not routes:
+  1. **Confirm target.** Show the resolved absolute `target_root` (returned by `GET /api/health`), the sentinel UUID, the OS platform. The user types `confirm` to advance — same affordance as M12's type-to-confirm. Refusing here just means "stop the tool and re-launch with a different `TARGET_ROOT`".
+  2. **Discovered collections.** Lists subfolders found by `discoverCollections` ([src/scanner/index.ts](./src/scanner/index.ts)). Read-only — collections are auto-discovered, not user-managed. Pre-flight summary: file counts via `GET /api/collections/preview` (new lightweight endpoint that runs `walkCollection` count-only, no hashing).
+  3. **Pick primary.** Radio list of collections; calls `POST /api/collections/primary`. Required; cannot advance without selection. This is what makes M15's safety net invisible to first-time users.
+  4. **Pick preset.** Dropdown over `GET /api/presets`; defaults to `Samsung Android phone backup`. Calls `PUT /api/config { active_preset }`. Shows rule/whitelist/priority counts under the dropdown (same component as M9's Settings card).
+- ⬜ **Finish.** `POST /api/wizard/complete` sets `wizard_completed_at` and redirects to `/` (Dashboard). The Dashboard's existing dry-run banner takes over from there.
+- ⬜ **Re-entry.** Settings page already exposes primary picker + preset dropdown (M9), so the wizard is genuinely one-time. No "redo wizard" button in v1; if the user really wants to, they delete `wizard_completed_at` from the `config` table by hand or use a hidden `POST /api/wizard/reset` (out of scope here).
+- ⬜ **Persistence:** all already shipped — `config` KV (M1), `collection.is_primary` partial unique index (M1), zod-validated config (M6/M9). Only the new key `wizard_completed_at` is added.
+- ⬜ **Tests:**
+  - Server: contract test for `GET /api/wizard/status`, `POST /api/wizard/complete`, idempotence of complete, refusal to complete without primary.
+  - Web: component tests for each step; snapshot of the redirect-to-wizard behavior.
+
+**Out of scope for v1 wizard:**
+
+- Multi-target_root management (Phase 2).
+- Editing `target_root` from inside the app (would re-bind sentinel — out of scope; relaunch with a new env var).
+- Custom presets or rule editors in the wizard (Settings can do this in Phase 2 as a JSON textarea; the wizard is happy-path only).
+
+See also: [docs/workflows/install-wizard.md](./docs/workflows/install-wizard.md) for the implementation guide.
+
+---
+
 ## Suggestion backlog from the post-implementation code review
 
 These are the non-blocking items the M7 hardening pass surfaced. Tagged with the milestone where they should ship.

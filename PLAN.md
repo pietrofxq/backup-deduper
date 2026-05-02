@@ -131,13 +131,18 @@ safe-dedupe/
    └─ fixtures/syntheticTree.ts       cross-platform builders
 ```
 
-The five files where safety lives or dies:
+The files where safety lives or dies (the canonical list — keep
+[AGENTS.md](./AGENTS.md) in sync):
 
 - `src/mover/quarantine.ts` — the two-phase commit move flow.
+- `src/mover/reconcile.ts` — startup crash recovery; promotes pending → executed only after re-verify.
+- `src/mover/restore.ts` — quarantine → live-tree, conflict-aware.
+- `src/mover/purge.ts` — the only `unlink` on user data; trash-fenced.
 - `src/classifier/rules.ts` — precedence engine; a bug here mis-classifies real photos as cruft.
-- `src/db/migrations/001_initial.sql` — schema; expensive to migrate later.
+- `src/db/migrations/0000_initial.sql` — schema; expensive to migrate later.
 - `src/target/guard.ts` — sentinel-UUID gate.
 - `tests/integration/safetyInvariant.test.ts` — operationalizes the headline invariant.
+- `tests/integration/crashRecovery.test.ts` — covers the kill-between-row-and-rename window.
 
 ## Library picks
 
@@ -147,7 +152,7 @@ The five files where safety lives or dies:
 - **Hashing**: built-in `crypto.createHash('sha256')` over `fs.createReadStream` (1 MB highWaterMark). No third-party hash lib.
 - **Walker**: native `fs.opendir` async iterator, hand-rolled recursion (~80 LOC). Explicit symlink rejection, depth tracking, per-dir error handling. **No `fast-glob`/`globby`/`fs-extra`.**
 - **UUID**: built-in `crypto.randomUUID()`.
-- **Logging**: `pino` (Fastify-native; structured JSON to stdout + `<target_root>/.dedupe/app.log`).
+- **Logging**: Fastify's default logger to stdout. Structured persistent records go to `<target_root>/.dedupe/audit.jsonl` via `appendAudit`. (PLAN previously named `pino` + `app.log`; the dependency was unused and the file was never created — see [docs/known-gaps.md](./docs/known-gaps.md) D-1, closed in M14.)
 - **Frontend**: React 19 + Vite 6 + Tailwind 4 + TanStack Query 5 + TanStack Table 8. Built bundle served by Fastify at `/`.
 - **Tests**: `vitest` 2 + `fast-check` 3 (property-based for the safety invariant).
 - **API contract tests**: Fastify's `.inject()` for in-process request testing — no HTTP socket needed, no Playwright, no extra deps.
@@ -166,10 +171,8 @@ Not used: Electron, Drizzle/Prisma, chokidar, fs-extra, third-party glob libs, W
 ├─ .dedupe/                          hidden (attrib +H on Windows; dot-prefix on POSIX); created on first run
 │  ├─ target-id.txt                  the sentinel UUID; bound to the DB
 │  ├─ state.db / state.db-wal / state.db-shm
-│  ├─ state.db.backup-YYYY-MM-DD     weekly snapshot, keep last 4
-│  ├─ audit.jsonl                    append-only
-│  ├─ app.log
-│  └─ config.json
+│  ├─ audit.jsonl                    append-only structured log
+│  └─ reports/<runId>.json           dry-run reports, one per scan
 └─ .dedupe-trash/                    hidden
    └─ <ISO-timestamp>-run-<id>/
       └─ <collection-name>/<original-relative-path>/<file>
@@ -290,6 +293,6 @@ See README "Verification" section.
 
 - `src/mover/quarantine.ts`
 - `src/classifier/rules.ts`
-- `src/db/migrations/001_initial.sql`
+- `src/db/migrations/0000_initial.sql`
 - `src/target/guard.ts`
 - `tests/integration/safetyInvariant.test.ts`

@@ -4,7 +4,25 @@ This is a safety-first deduplication tool. The single most important property is
 
 These directives exist because past iterations of this codebase introduced regressions that a careful reviewer caught. Each rule below is rooted in a real bug that landed (and was reverted). Treat the list as a checklist before submitting any change that touches the safety-critical surface.
 
-## The five files where safety lives or dies
+## Documentation index — read these for factual reference
+
+This file is the rulebook (the *thou shalt nots*). For *what is and how it works*, the canonical references are:
+
+- [`docs/README.md`](./docs/README.md) — index. Start here when you need to look something up.
+- [`docs/architecture.md`](./docs/architecture.md) — process model + module map + data flow.
+- [`docs/safety-model.md`](./docs/safety-model.md) — the 8 invariants, fences, two-phase commit (operational).
+- [`docs/schema.md`](./docs/schema.md) — every SQLite table + column + index, with rationale.
+- [`docs/api.md`](./docs/api.md) — HTTP routes + SSE wire format + error envelopes.
+- [`docs/classifier.md`](./docs/classifier.md) — rule precedence, presets, whitelists.
+- [`docs/config.md`](./docs/config.md) — config keys, defaults, gated keys.
+- [`docs/conventions.md`](./docs/conventions.md) — code style, error handling, testing, cross-platform.
+- [`docs/known-gaps.md`](./docs/known-gaps.md) — doc/code drift and deferred backlog items not yet in `ROADMAP.md`.
+- [`docs/decisions/`](./docs/decisions/) — ADRs. **Read before reversing a choice.**
+- [`docs/workflows/`](./docs/workflows/) — step-by-step guides for adding routes, presets, mover ops, schema changes.
+
+When you change behavior in a way that contradicts a doc, fix the doc in the same commit. AGENTS.md rule #8 ("doc/code drift is a real bug class") applies to `docs/` too.
+
+## The files where safety lives or dies
 
 Documented in `PLAN.md` and re-verified each milestone. Any change touching these is high-stakes:
 
