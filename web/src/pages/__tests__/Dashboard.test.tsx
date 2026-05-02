@@ -6,6 +6,7 @@ import { buildMockApi, renderWithProviders } from '../../test-utils.js';
 import type {
   Collection,
   Config,
+  DryRunReport,
   HealthResponse,
   RunRow,
   ScanDetail,
@@ -230,5 +231,120 @@ describe('DashboardPage', () => {
     expect(
       screen.queryByText(/no primary collection set — quarantine disabled/i),
     ).toBeNull();
+  });
+
+  it('LastScanSummary shows the no-primary header and hides the percentage line when code=no_primary_set (M15)', async () => {
+    const run: RunRow = {
+      id: 11,
+      kind: 'scan',
+      status: 'completed',
+      dry_run: 1,
+      config_json: '{}',
+      started_at: '2025-01-01 12:00:00',
+      finished_at: '2025-01-01 12:00:01',
+    };
+    const report: DryRunReport = {
+      runId: 11,
+      generatedAt: new Date().toISOString(),
+      presetName: 'Samsung Android phone backup',
+      dryRun: true,
+      collections: collections.map((c) => ({ ...c, isPrimary: false })),
+      countsByReason: { duplicate_cross_collection: { files: 1, bytes: 100 } },
+      totalActions: 1,
+      totalBytes: 100,
+      reviewPairs: 0,
+      emptyDirActions: 0,
+      sanityGuard: {
+        passed: false,
+        primaryFiles: 0,
+        primaryBytes: 0,
+        plannedFiles: 1,
+        plannedBytes: 100,
+        filesPct: 0,
+        bytesPct: 0,
+        reason: 'no primary collection set; mark one as primary before running quarantine',
+        code: 'no_primary_set',
+      },
+      scanSummary: { totalFiles: 2, totalHashed: 2, totalCached: 0, durationMs: 50 },
+      actions: [],
+      reviewSamples: [],
+    };
+
+    const api = buildMockApi({
+      health: vi.fn().mockResolvedValue(baseHealth),
+      getConfig: vi.fn().mockResolvedValue(baseConfig),
+      listCollections: vi.fn().mockResolvedValue(
+        collections.map((c) => ({ ...c, isPrimary: false })),
+      ),
+      listScans: vi.fn().mockResolvedValue([run]),
+      getScan: vi.fn().mockResolvedValue({ run, report } satisfies ScanDetail),
+    });
+
+    renderWithProviders(<DashboardPage />, { api });
+
+    expect(
+      await screen.findByText(/Quarantine refused — no primary set/i),
+    ).toBeInTheDocument();
+    // The percentage line is irrelevant when code=no_primary_set (primary
+    // counts are zero) — must be suppressed so the user isn't told
+    // "files 0% · bytes 0%".
+    expect(screen.queryByText(/files 0% · bytes 0%/i)).toBeNull();
+  });
+
+  it('LastScanSummary shows the percentage line when code=pct_exceeded (M15 regression guard)', async () => {
+    const run: RunRow = {
+      id: 12,
+      kind: 'scan',
+      status: 'completed',
+      dry_run: 1,
+      config_json: '{}',
+      started_at: '2025-01-01 12:00:00',
+      finished_at: '2025-01-01 12:00:01',
+    };
+    const report: DryRunReport = {
+      runId: 12,
+      generatedAt: new Date().toISOString(),
+      presetName: 'Samsung Android phone backup',
+      dryRun: true,
+      collections: collections.map((c) => ({
+        id: c.id,
+        relPath: c.relPath,
+        isPrimary: c.isPrimary,
+      })),
+      countsByReason: { duplicate_within_collection: { files: 4, bytes: 400 } },
+      totalActions: 4,
+      totalBytes: 400,
+      reviewPairs: 0,
+      emptyDirActions: 0,
+      sanityGuard: {
+        passed: false,
+        primaryFiles: 5,
+        primaryBytes: 500,
+        plannedFiles: 4,
+        plannedBytes: 400,
+        filesPct: 0.8,
+        bytesPct: 0.8,
+        reason: 'files 80.0% > 50% and bytes 80.0% > 70%',
+        code: 'pct_exceeded',
+      },
+      scanSummary: { totalFiles: 5, totalHashed: 5, totalCached: 0, durationMs: 100 },
+      actions: [],
+      reviewSamples: [],
+    };
+
+    const api = buildMockApi({
+      health: vi.fn().mockResolvedValue(baseHealth),
+      getConfig: vi.fn().mockResolvedValue(baseConfig),
+      listCollections: vi.fn().mockResolvedValue(collections),
+      listScans: vi.fn().mockResolvedValue([run]),
+      getScan: vi.fn().mockResolvedValue({ run, report } satisfies ScanDetail),
+    });
+
+    renderWithProviders(<DashboardPage />, { api });
+
+    expect(await screen.findByText(/Sanity guard tripped/i)).toBeInTheDocument();
+    expect(screen.getByText(/files 80% · bytes 80%/i)).toBeInTheDocument();
+    // No-primary header must NOT show in the pct branch.
+    expect(screen.queryByText(/Quarantine refused — no primary set/i)).toBeNull();
   });
 });

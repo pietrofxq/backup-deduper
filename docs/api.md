@@ -57,10 +57,17 @@ a discriminator add a `kind` field:
     "plannedBytes": 90000000,
     "filesPct": 0.65,
     "bytesPct": 0.73,
-    "reason": "files 65.0% > 50% and bytes 73.0% > 70%"
+    "reason": "files 65.0% > 50% and bytes 73.0% > 70%",
+    "code": "pct_exceeded"
   }
 }
 ```
+
+`code` is a stable identifier for the failure mode — `'no_primary_set'`
+when no primary collection is set and at least one action would fire (M15
+fail-closed), or `'pct_exceeded'` when the planned actions exceed the
+configured percentage limits. `null` when `passed === true`. The UI
+branches on `code` instead of parsing `reason` prose.
 
 `UnreadableSubtreeError` includes `unreadablePaths` and `collectionRelPath`.
 
