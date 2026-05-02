@@ -235,7 +235,7 @@ describe('quarantine — two-phase commit happy path', () => {
         scanRunId: scan.runId,
         actions: scan.actions,
         emptyDirs: scan.emptyDirActions,
-        scanGuard: scan.sanityGuard,
+        scanPrimaryId: scan.scanPrimaryId,
       });
     } catch (err) {
       thrown = err;
@@ -252,6 +252,68 @@ describe('quarantine — two-phase commit happy path', () => {
       actions: scan.actions,
       emptyDirs: scan.emptyDirActions,
       scanGuard: scan.sanityGuard,
+      ignoreSanityGuard: true,
+    });
+    expect(result.summary.executed).toBeGreaterThanOrEqual(0);
+    db.client.close();
+  });
+
+  it('M15 round-3 — refuses a stale plan when the primary is SWITCHED between scan and apply', async () => {
+    // Regression for review on PR #6: even when the scan was taken WITH
+    // a primary set, switching primary before /quarantine/run still
+    // leaves the cached actions stale — they were chosen relative to the
+    // old primary's path priority and the cross-collection primary-wins
+    // rule. The recomputed pct guard cannot catch this on its own
+    // because it runs against the *new* primary's footprint.
+    buildTree(root, {
+      'Backup-A/photo.jpg': 'photo',
+      'Backup-B/photo.jpg': 'photo',
+    });
+    await boot({ targetRoot: root, noServe: true });
+    const db = openDb(root);
+    syncCollectionsTable(db, root);
+    const a = listCollections(db).find((c) => c.rel_path === 'Backup-A')!;
+    const b = listCollections(db).find((c) => c.rel_path === 'Backup-B')!;
+
+    // Step 1: scan with Backup-A primary.
+    setPrimary(db, a.id);
+    const scan = await runScanJob(db, root, { dryRun: true });
+    expect(scan.scanPrimaryId).toBe(a.id);
+    expect(scan.sanityGuard.passed).toBe(true);
+    expect(scan.actions.length).toBeGreaterThan(0);
+
+    // Step 2: user switches primary to Backup-B.
+    setPrimary(db, b.id);
+
+    disableDryRun(db, 'I have reviewed the dry-run report', root);
+
+    // Step 3: applying the cached plan must refuse with primary_changed.
+    let thrown: unknown = null;
+    try {
+      runQuarantineJob({
+        db,
+        targetRoot: root,
+        scanRunId: scan.runId,
+        actions: scan.actions,
+        emptyDirs: scan.emptyDirActions,
+        scanPrimaryId: scan.scanPrimaryId,
+      });
+    } catch (err) {
+      thrown = err;
+    }
+    expect(thrown).toBeInstanceOf(SanityGuardError);
+    const guardErr = thrown as SanityGuardError;
+    expect(guardErr.guard.code).toBe('primary_changed');
+    expect(guardErr.message).toMatch(/primary collection changed|rescan/i);
+
+    // Override flag still bypasses (advanced-user escape hatch).
+    const result = runQuarantineJob({
+      db,
+      targetRoot: root,
+      scanRunId: scan.runId,
+      actions: scan.actions,
+      emptyDirs: scan.emptyDirActions,
+      scanPrimaryId: scan.scanPrimaryId,
       ignoreSanityGuard: true,
     });
     expect(result.summary.executed).toBeGreaterThanOrEqual(0);

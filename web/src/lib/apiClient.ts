@@ -203,7 +203,7 @@ export interface SanityGuard {
   bytesPct: number;
   reason: string | null;
   /** Stable failure identifier when `passed === false`. */
-  code: 'no_primary_set' | 'pct_exceeded' | null;
+  code: 'no_primary_set' | 'primary_changed' | 'pct_exceeded' | null;
 }
 
 export interface DryRunReport {

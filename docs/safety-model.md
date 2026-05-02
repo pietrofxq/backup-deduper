@@ -87,12 +87,17 @@ Refuses to run a quarantine pass when:
   anchor — quarantining files (or rmdir'ing folders) in that state is
   exactly the footgun this guard exists to prevent. Vacuous (zero-action,
   zero-emptyDir) runs still pass.
-- The cached scan was taken with no primary, even if the user has since
-  selected one. The action list still reflects the old lex-tiebroken
-  keeper, so applying it could quarantine files inside what is now the
-  primary collection. `runQuarantineJob` checks `scanGuard.code` from the
-  cached `ScanJobResult` and refuses (also `code: 'no_primary_set'`); the
-  user must rescan.
+- The cached scan's primary id differs from the current primary (any
+  shift counts: null→A, A→B, A→null). The classifier shapes its keeper-
+  picking around whichever collection was primary at scan time — the
+  within-collection canonical winner respects the primary's path
+  priority, and cross-collection dedup picks losers relative to the
+  primary-wins rule. Applying that stale plan after a primary switch
+  could quarantine files inside the user's just-marked source-of-truth
+  collection. `runQuarantineJob` compares `cached.scanPrimaryId` to
+  `getPrimary(db)?.id` and refuses on any mismatch (`code:
+  'no_primary_set'` when scan-time was null, `code: 'primary_changed'`
+  when both were set but differ). The user must rescan.
 - Planned actions would touch more than 50% of files **or** more than 70%
   of bytes of the primary collection (`code: 'pct_exceeded'`).
 

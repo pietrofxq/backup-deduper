@@ -1,10 +1,14 @@
 import type { Db } from '../db/index.js';
-import { createRun, getRun, setRunStatus } from '../db/queries.js';
+import { createRun, getPrimary, getRun, setRunStatus } from '../db/queries.js';
 import { executeQuarantine, type QuarantineSummary } from '../mover/quarantine.js';
 import type { EmptyDir, PlannedAction } from '../classifier/rules.js';
 import { loadConfig, saveConfig } from '../config/loader.js';
 import { CONFIRMATION_PHRASE } from '../config/schema.js';
-import { checkSanityGuard, type SanityGuardResult } from './sanityGuard.js';
+import {
+  checkSanityGuard,
+  type SanityGuardCode,
+  type SanityGuardResult,
+} from './sanityGuard.js';
 import { appendAudit } from '../audit/log.js';
 import { parseSqliteDatetime } from '../db/datetime.js';
 
@@ -35,19 +39,21 @@ export interface QuarantineJobInput {
   /** Pass true to bypass the sanity guard, after explicit user override. */
   ignoreSanityGuard?: boolean;
   /**
-   * The sanity-guard result recorded at scan time. Used to detect a
-   * stale-plan attack: if the original scan was taken with no primary
-   * collection set (`code === 'no_primary_set'`), the cached actions
-   * reflect the lex-tiebroken keeper, not the user's deliberate choice.
-   * Re-running the guard against current DB state would now pass
-   * (a primary has since been set), but the plan itself is tainted —
-   * applying it could quarantine files that live under what is now the
-   * primary collection. Refuse unless `ignoreSanityGuard` is true.
+   * The primary collection id at the time the scan was classified, or
+   * null if no primary was set. The classifier's keeper-picking is
+   * shaped by this — losers under cross-collection dedup are chosen
+   * relative to which collection is primary, AND the within-collection
+   * canonical winner respects the primary's path priority. If the user
+   * has switched primary (or set one for the first time, or cleared
+   * it) since the scan, the cached plan is stale: applying it would
+   * quarantine files inside what is now the source-of-truth collection.
    *
-   * Optional only because the unit tests construct the input directly;
-   * production callers (the `/api/quarantine/run` route) MUST pass it.
+   * If `undefined`, the comparison is skipped (used by unit/property
+   * tests that construct the input directly). Production callers (the
+   * `/api/quarantine/run` route) MUST pass it — they read it from the
+   * cached `ScanJobResult.scanPrimaryId`.
    */
-  scanGuard?: SanityGuardResult;
+  scanPrimaryId?: number | null;
 }
 
 export interface QuarantineJobResult {
@@ -66,23 +72,48 @@ export function runQuarantineJob(input: QuarantineJobInput): QuarantineJobResult
     );
   }
 
-  // Stale-plan refusal: the cached actions came from a scan taken without
-  // a primary, so the canonical-keeper picker fell back to lex tiebreak.
-  // Even if a primary has been set since, the plan reflects the wrong
-  // anchor and must not be applied — re-checking the current DB state
-  // would mask this because the recomputed pct guard runs against the
-  // *new* primary's footprint. Surface the original (no_primary_set)
-  // result so the API client sees a consistent error code.
-  if (
-    input.scanGuard?.code === 'no_primary_set' &&
-    !input.ignoreSanityGuard
-  ) {
-    throw new SanityGuardError(
-      'Scan was taken without a primary collection; the cached action plan reflects' +
-        ' a lex-tiebroken keeper rather than a deliberate primary. Re-scan after' +
-        ' marking a primary, or pass ignoreSanityGuard=true to apply the stale plan.',
-      input.scanGuard,
-    );
+  // Stale-plan refusal: the classifier's keeper-picking is anchored on
+  // whichever collection was primary at scan time. If the primary has
+  // changed since (or was set/cleared/swapped between scan and apply),
+  // the cached actions reflect the *old* anchor — applying them would
+  // quarantine files that the user just marked as their source-of-truth.
+  //
+  // The recomputed `checkSanityGuard` below cannot catch this on its own:
+  // a small duplicate set under the new primary keeps the pct figures
+  // under the limits, so the run would silently proceed against a stale
+  // plan. The only signal that survives is the scan-time primary id —
+  // compare it to the current primary and refuse on any mismatch.
+  if (input.scanPrimaryId !== undefined && !input.ignoreSanityGuard) {
+    const currentPrimaryId = getPrimary(db)?.id ?? null;
+    if (input.scanPrimaryId !== currentPrimaryId) {
+      // Distinguish "scan was made without a primary" from "primary
+      // changed". Both are stale; both refuse; the codes give clients
+      // a stable enum to branch on for UI copy / analytics.
+      const code: SanityGuardCode =
+        input.scanPrimaryId === null ? 'no_primary_set' : 'primary_changed';
+      const reason =
+        input.scanPrimaryId === null
+          ? 'Scan was taken without a primary collection; the cached action plan' +
+            ' reflects a lex-tiebroken keeper rather than a deliberate primary.' +
+            ' Rescan after marking a primary, or pass ignoreSanityGuard=true to' +
+            ' apply the stale plan.'
+          : `Primary collection changed since scan (scan-time id=${input.scanPrimaryId},` +
+            ` current id=${currentPrimaryId ?? 'null'}); the cached action plan was` +
+            ' shaped around the old primary and would now quarantine files inside' +
+            ' the newly-marked source-of-truth collection. Rescan to refresh, or' +
+            ' pass ignoreSanityGuard=true to apply the stale plan.';
+      throw new SanityGuardError(reason, {
+        passed: false,
+        primaryFiles: 0,
+        primaryBytes: 0,
+        plannedFiles: actions.length,
+        plannedBytes: actions.reduce((a, b) => a + b.size, 0),
+        filesPct: 0,
+        bytesPct: 0,
+        reason,
+        code,
+      });
+    }
   }
 
   const guard = checkSanityGuard(db, actions, {

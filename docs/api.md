@@ -63,20 +63,27 @@ a discriminator add a `kind` field:
 }
 ```
 
-`code` is a stable identifier for the failure mode — `'no_primary_set'`
-when no primary collection is set and at least one action (or empty-dir
-removal) would fire (M15 fail-closed), or `'pct_exceeded'` when the
-planned actions exceed the configured percentage limits. `null` when
-`passed === true`. The UI branches on `code` instead of parsing `reason`
-prose.
+`code` is a stable identifier for the failure mode:
 
-`POST /api/quarantine/run` also refuses with `code: 'no_primary_set'`
-when the cached scan was taken without a primary, even if the user has
-since marked one. The cached action list reflects the lex-tiebroken
-keeper, not the deliberate primary, so applying it could quarantine
-files inside the just-marked primary collection. The error message
-mentions "stale" / "rescan" to distinguish from the live no-primary
-case. Pass `ignoreSanityGuard: true` to override.
+- `'no_primary_set'` — no primary collection is set and at least one
+  action (or empty-dir removal) would fire (M15 fail-closed). Also
+  raised at quarantine-apply time when the cached scan was taken
+  without a primary, even if the user has since marked one — the
+  cached action list reflects a lex-tiebroken keeper, not a deliberate
+  primary.
+- `'primary_changed'` — the cached scan was taken with primary A but
+  the current primary is B. The action list was shaped around A's path
+  priority and cross-collection primary-wins rule; applying it would
+  quarantine files inside the now-primary collection. Rescan to
+  refresh.
+- `'pct_exceeded'` — planned actions exceed the configured files /
+  bytes percentage of the primary collection.
+- `null` when `passed === true`.
+
+`POST /api/quarantine/run` enforces the stale-plan refusal by
+comparing `cached.scanPrimaryId` to the current primary at apply time;
+the recomputed pct guard cannot catch a primary-switch on its own.
+Pass `ignoreSanityGuard: true` to override.
 
 `UnreadableSubtreeError` includes `unreadablePaths` and `collectionRelPath`.
 

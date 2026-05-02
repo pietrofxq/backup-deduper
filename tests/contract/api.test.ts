@@ -361,6 +361,62 @@ describe('API — scan + quarantine + restore', () => {
     expect(body.error).toMatch(/stale|re-?scan|cached/i);
   });
 
+  it('M15 round-3 — primary switched between scan and apply: /quarantine/run refuses with code=primary_changed', async () => {
+    // Regression for review on PR #6. Even with a primary set at scan
+    // time, switching to a different primary before /quarantine/run
+    // leaves the cached actions stale — they were shaped around the
+    // OLD primary's path priority. The recomputed pct check can't catch
+    // this. The route must compare scan-time vs current primary id and
+    // refuse on any mismatch.
+    await setup({
+      'Backup-A/photo.jpg': 'photo',
+      'Backup-B/photo.jpg': 'photo',
+    });
+    const cols = JSON.parse(
+      (await app.inject({ method: 'GET', url: '/api/collections' })).body,
+    );
+    const a = cols.find((c: { relPath: string }) => c.relPath === 'Backup-A')!;
+    const b = cols.find((c: { relPath: string }) => c.relPath === 'Backup-B')!;
+
+    // 1) Mark Backup-A primary.
+    await app.inject({
+      method: 'POST',
+      url: '/api/collections/set-primary',
+      payload: { collectionId: a.id },
+    });
+    await app.inject({
+      method: 'POST',
+      url: '/api/config/disable-dry-run',
+      payload: { phrase: 'I have reviewed the dry-run report' },
+    });
+
+    // 2) Scan.
+    const scan = JSON.parse(
+      (await app.inject({ method: 'POST', url: '/api/scans', payload: {} })).body,
+    );
+    expect(scan.report.sanityGuard.passed).toBe(true);
+    expect(scan.report.totalActions).toBeGreaterThan(0);
+
+    // 3) Switch primary to Backup-B.
+    await app.inject({
+      method: 'POST',
+      url: '/api/collections/set-primary',
+      payload: { collectionId: b.id },
+    });
+
+    // 4) Apply stale plan → refused.
+    const blocked = await app.inject({
+      method: 'POST',
+      url: '/api/quarantine/run',
+      payload: { scanRunId: scan.runId },
+    });
+    expect(blocked.statusCode).toBe(400);
+    const body = JSON.parse(blocked.body);
+    expect(body.kind).toBe('sanity_guard');
+    expect(body.guard.code).toBe('primary_changed');
+    expect(body.error).toMatch(/primary collection changed|rescan/i);
+  });
+
   it('M15 — POST /quarantine/run with no primary set returns 400 sanity_guard with code=no_primary_set', async () => {
     // Deliberately skip the set-primary call. With actions emitted by the
     // classifier (cross-collection duplicate), the guard must refuse.

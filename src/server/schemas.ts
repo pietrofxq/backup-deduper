@@ -49,10 +49,18 @@ const SanityGuard = z.object({
   reason: z.string().nullable(),
   /**
    * Stable identifier for the failure mode when `passed === false`. Lets the
-   * UI branch on a fixed enum (`no_primary_set` → "set a primary first" CTA;
-   * `pct_exceeded` → override checkbox) without parsing `reason` prose.
+   * UI branch on a fixed enum without parsing `reason` prose:
+   *
+   * - `no_primary_set` → "Set a primary first" CTA. Fired when the scan was
+   *   taken with no primary, regardless of current state.
+   * - `primary_changed` → "Primary changed since scan; rescan to refresh."
+   *   Fired when scan-time primary differs from current primary (both set
+   *   to different ids).
+   * - `pct_exceeded` → override checkbox.
    */
-  code: z.enum(['no_primary_set', 'pct_exceeded']).nullable(),
+  code: z
+    .enum(['no_primary_set', 'primary_changed', 'pct_exceeded'])
+    .nullable(),
 });
 
 export const DryRunReport = z.object({

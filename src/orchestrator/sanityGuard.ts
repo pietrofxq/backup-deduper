@@ -21,14 +21,21 @@ export interface SanityGuardInput {
  * stable identifier without parsing prose.
  *
  * - `no_primary_set`: `getPrimary` returned null but the planner emitted at
- *   least one action. The dedup canonical-keeper logic falls back to lex
- *   tiebreak in that state — quarantining files without a deliberately
- *   chosen primary is exactly the footgun the sanity guard exists to
- *   prevent. Fail closed.
+ *   least one action (or empty-dir removal). The dedup canonical-keeper
+ *   logic falls back to lex tiebreak in that state — quarantining files
+ *   (or rmdir'ing folders) without a deliberately chosen primary is
+ *   exactly the footgun the sanity guard exists to prevent. Fail closed.
+ *   Also the code raised at quarantine-time when the cached scan was
+ *   taken without a primary, even if the user has since marked one (the
+ *   action plan still reflects the lex-tiebroken keeper).
+ * - `primary_changed`: the cached scan was taken with primary A but the
+ *   current primary is B (or null). The classifier picked losers based
+ *   on A; applying that plan would quarantine files inside what is now
+ *   the user's source-of-truth collection. Refuse and require a rescan.
  * - `pct_exceeded`: planned actions exceed the configured files / bytes
  *   percentage of the primary collection.
  */
-export type SanityGuardCode = 'no_primary_set' | 'pct_exceeded';
+export type SanityGuardCode = 'no_primary_set' | 'primary_changed' | 'pct_exceeded';
 
 export interface SanityGuardResult {
   passed: boolean;

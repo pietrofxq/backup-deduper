@@ -51,6 +51,7 @@ function fakeResult(runId: number): ScanJobResult {
       code: null,
     },
     reportPath: '/tmp/x',
+    scanPrimaryId: null,
   };
 }
 
