@@ -189,6 +189,7 @@ export async function runScanJob(
     const sg = checkSanityGuard(db, cls.actions, {
       filesPctLimit: cfg.sanity_guard_files_pct,
       bytesPctLimit: cfg.sanity_guard_bytes_pct,
+      emptyDirCount: cls.emptyDirActions.length,
     });
 
     const report: DryRunReport = {

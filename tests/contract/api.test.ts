@@ -315,6 +315,52 @@ describe('API — scan + quarantine + restore', () => {
     db.client.close();
   });
 
+  it('M15 — stale-plan attack: scan with no primary, set primary, /quarantine/run refuses with code=no_primary_set', async () => {
+    // Regression for Copilot review on PR #6. The cached scan was taken
+    // without a primary, so the planner used lex tiebreak. Setting a
+    // primary AFTER the scan changes the DB state but not the cached
+    // action list — applying it would quarantine files inside what is
+    // now the primary collection. The route MUST refuse on the cached
+    // sanityGuard.code === 'no_primary_set' even though re-checking
+    // current state would now pass.
+    await setup({
+      'Backup-A/photo.jpg': 'photo',
+      'Backup-B/photo.jpg': 'photo',
+    });
+    await app.inject({
+      method: 'POST',
+      url: '/api/config/disable-dry-run',
+      payload: { phrase: 'I have reviewed the dry-run report' },
+    });
+    // 1) Scan with NO primary.
+    const scanResp = await app.inject({ method: 'POST', url: '/api/scans', payload: {} });
+    const scan = JSON.parse(scanResp.body);
+    expect(scan.report.sanityGuard.code).toBe('no_primary_set');
+
+    // 2) NOW mark a primary.
+    const cols = JSON.parse(
+      (await app.inject({ method: 'GET', url: '/api/collections' })).body,
+    );
+    const primary = cols.find((c: { relPath: string }) => c.relPath === 'Backup-A')!;
+    await app.inject({
+      method: 'POST',
+      url: '/api/collections/set-primary',
+      payload: { collectionId: primary.id },
+    });
+
+    // 3) Try to apply the stale plan → refused with structured error.
+    const blocked = await app.inject({
+      method: 'POST',
+      url: '/api/quarantine/run',
+      payload: { scanRunId: scan.runId },
+    });
+    expect(blocked.statusCode).toBe(400);
+    const body = JSON.parse(blocked.body);
+    expect(body.kind).toBe('sanity_guard');
+    expect(body.guard.code).toBe('no_primary_set');
+    expect(body.error).toMatch(/stale|re-?scan|cached/i);
+  });
+
   it('M15 — POST /quarantine/run with no primary set returns 400 sanity_guard with code=no_primary_set', async () => {
     // Deliberately skip the set-primary call. With actions emitted by the
     // classifier (cross-collection duplicate), the guard must refuse.

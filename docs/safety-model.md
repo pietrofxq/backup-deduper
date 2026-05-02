@@ -81,16 +81,28 @@ non-destructive.
 
 Refuses to run a quarantine pass when:
 
-- No primary collection is set **and** at least one action would fire
+- No primary collection is set **and** the run would do anything to the
+  tree — at least one file action OR at least one empty-directory removal
   (`code: 'no_primary_set'`). Without a primary, the dedup tiebreak has no
-  anchor — quarantining files in that state is exactly the footgun this
-  guard exists to prevent. Vacuous (zero-action) runs still pass.
+  anchor — quarantining files (or rmdir'ing folders) in that state is
+  exactly the footgun this guard exists to prevent. Vacuous (zero-action,
+  zero-emptyDir) runs still pass.
+- The cached scan was taken with no primary, even if the user has since
+  selected one. The action list still reflects the old lex-tiebroken
+  keeper, so applying it could quarantine files inside what is now the
+  primary collection. `runQuarantineJob` checks `scanGuard.code` from the
+  cached `ScanJobResult` and refuses (also `code: 'no_primary_set'`); the
+  user must rescan.
 - Planned actions would touch more than 50% of files **or** more than 70%
   of bytes of the primary collection (`code: 'pct_exceeded'`).
 
-Both are bypassable via the explicit `ignoreSanityGuard: true` override.
+All three are bypassable via the explicit `ignoreSanityGuard: true`
+override.
 
-[src/orchestrator/sanityGuard.ts:49–129](../src/orchestrator/sanityGuard.ts).
+[src/orchestrator/sanityGuard.ts](../src/orchestrator/sanityGuard.ts) +
+[src/orchestrator/quarantineJob.ts](../src/orchestrator/quarantineJob.ts)
+(stale-plan refusal lives in the job, not the guard, because the cached
+scan-time guard is the canonical signal).
 
 ### 6. Restore never overwrites
 

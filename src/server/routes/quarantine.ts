@@ -121,6 +121,11 @@ export async function registerQuarantineRoutes(
             actions: cached.actions,
             emptyDirs: cached.emptyDirActions,
             ignoreSanityGuard: req.body.ignoreSanityGuard ?? false,
+            // The cached scan's guard carries the canonical "no primary at
+            // scan time" flag. Pass it so runQuarantineJob can refuse a
+            // stale plan even if the user has since set a primary (the
+            // plan itself reflects the old lex-tiebroken keeper).
+            scanGuard: cached.sanityGuard,
           }),
         );
       } catch (err) {

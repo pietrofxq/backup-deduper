@@ -5,6 +5,14 @@ import type { PlannedAction } from '../classifier/rules.js';
 export interface SanityGuardInput {
   filesPctLimit: number; // e.g. 0.5
   bytesPctLimit: number; // e.g. 0.7
+  /**
+   * Number of empty-directory removals planned for the same run. The mover
+   * applies these as `rmdirSync` mutations on the live tree, so they have
+   * to count toward the no-primary fail-closed branch — a run that emits
+   * zero file actions but several empty-dir removals would otherwise slip
+   * past as "vacuous" even though it mutates the tree.
+   */
+  emptyDirCount?: number;
 }
 
 /**
@@ -53,13 +61,15 @@ export function checkSanityGuard(
 ): SanityGuardResult {
   const primary = getPrimary(db);
   const plannedBytes = actions.reduce((a, b) => a + b.size, 0);
+  const emptyDirCount = input.emptyDirCount ?? 0;
   if (!primary) {
-    // No-op runs (no actions emitted) are safe regardless of primary state —
-    // the user hasn't been prompted to confirm anything yet. A populated
-    // run without a primary IS dangerous: the canonical-keeper picker has
-    // no anchor, so a duplicate-cross-collection action could quarantine a
-    // file the user thought of as their source of truth.
-    if (actions.length === 0) {
+    // No-op runs (no actions AND no empty-dir removals emitted) are safe
+    // regardless of primary state — the user hasn't been prompted to confirm
+    // anything yet. A populated run without a primary IS dangerous: the
+    // canonical-keeper picker has no anchor, so a duplicate-cross-collection
+    // action could quarantine a file the user thought of as their source of
+    // truth, AND the empty-dir sweep mutates the live tree on its own.
+    if (actions.length === 0 && emptyDirCount === 0) {
       return {
         passed: true,
         primaryFiles: 0,

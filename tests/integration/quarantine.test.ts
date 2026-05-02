@@ -195,6 +195,69 @@ describe('quarantine — two-phase commit happy path', () => {
     db.client.close();
   });
 
+  it('M15 — refuses a STALE plan from a no-primary scan even after a primary is selected', async () => {
+    // Regression for Copilot review on PR #6 (stale-plan attack):
+    //
+    //   1. User scans with no primary set.
+    //   2. classifier emits actions based on lex tiebreak (no anchor).
+    //   3. User notices, marks one collection primary.
+    //   4. User calls /quarantine/run with the SAME scanRunId.
+    //
+    // The cached actions list still reflects the lex-tiebroken plan, but
+    // recomputing checkSanityGuard against the new DB state would now see
+    // the primary set and pass — masking the fact that the plan itself is
+    // tainted. runQuarantineJob must refuse based on the scan-time guard
+    // (`scanGuard: cached.sanityGuard`), regardless of current primary.
+    buildTree(root, {
+      'Backup-A/photo.jpg': 'photo',
+      'Backup-B/photo.jpg': 'photo',
+    });
+    await boot({ targetRoot: root, noServe: true });
+    const db = openDb(root);
+    syncCollectionsTable(db, root);
+    // Step 1: scan with NO primary set.
+    const scan = await runScanJob(db, root, { dryRun: true });
+    expect(scan.sanityGuard.code).toBe('no_primary_set');
+
+    // Step 2: now mark a primary (post-scan).
+    const a = listCollections(db).find((c) => c.rel_path === 'Backup-A')!;
+    setPrimary(db, a.id);
+
+    disableDryRun(db, 'I have reviewed the dry-run report', root);
+
+    // Step 3: with scanGuard wired through (mimics the route), the job
+    // refuses despite the recomputed guard now passing.
+    let thrown: unknown = null;
+    try {
+      runQuarantineJob({
+        db,
+        targetRoot: root,
+        scanRunId: scan.runId,
+        actions: scan.actions,
+        emptyDirs: scan.emptyDirActions,
+        scanGuard: scan.sanityGuard,
+      });
+    } catch (err) {
+      thrown = err;
+    }
+    expect(thrown).toBeInstanceOf(SanityGuardError);
+    expect((thrown as SanityGuardError).guard.code).toBe('no_primary_set');
+    expect((thrown as SanityGuardError).message).toMatch(/stale|re-?scan|cached/i);
+
+    // The override flag still bypasses (escape hatch for advanced users).
+    const result = runQuarantineJob({
+      db,
+      targetRoot: root,
+      scanRunId: scan.runId,
+      actions: scan.actions,
+      emptyDirs: scan.emptyDirActions,
+      scanGuard: scan.sanityGuard,
+      ignoreSanityGuard: true,
+    });
+    expect(result.summary.executed).toBeGreaterThanOrEqual(0);
+    db.client.close();
+  });
+
   it('removes empty folders left behind by quarantine sweeps', async () => {
     buildTree(root, {
       'Backup-A/keep/a.txt': 'unique',

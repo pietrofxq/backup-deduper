@@ -64,10 +64,19 @@ a discriminator add a `kind` field:
 ```
 
 `code` is a stable identifier for the failure mode — `'no_primary_set'`
-when no primary collection is set and at least one action would fire (M15
-fail-closed), or `'pct_exceeded'` when the planned actions exceed the
-configured percentage limits. `null` when `passed === true`. The UI
-branches on `code` instead of parsing `reason` prose.
+when no primary collection is set and at least one action (or empty-dir
+removal) would fire (M15 fail-closed), or `'pct_exceeded'` when the
+planned actions exceed the configured percentage limits. `null` when
+`passed === true`. The UI branches on `code` instead of parsing `reason`
+prose.
+
+`POST /api/quarantine/run` also refuses with `code: 'no_primary_set'`
+when the cached scan was taken without a primary, even if the user has
+since marked one. The cached action list reflects the lex-tiebroken
+keeper, not the deliberate primary, so applying it could quarantine
+files inside the just-marked primary collection. The error message
+mentions "stale" / "rescan" to distinguish from the live no-primary
+case. Pass `ignoreSanityGuard: true` to override.
 
 `UnreadableSubtreeError` includes `unreadablePaths` and `collectionRelPath`.
 
