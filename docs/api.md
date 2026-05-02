@@ -63,21 +63,20 @@ a discriminator add a `kind` field:
 }
 ```
 
-`code` is a stable identifier for the failure mode:
+`code` is a stable identifier for the failure mode. Each value has
+exactly one origin so clients can branch unambiguously:
 
-- `'no_primary_set'` — no primary collection is set and at least one
-  action (or empty-dir removal) would fire (M15 fail-closed). Also
-  raised at quarantine-apply time when the cached scan was taken
-  without a primary, even if the user has since marked one — the
-  cached action list reflects a lex-tiebroken keeper, not a deliberate
-  primary.
-- `'primary_changed'` — the cached scan was taken with primary A but
-  the current primary is B. The action list was shaped around A's path
-  priority and cross-collection primary-wins rule; applying it would
-  quarantine files inside the now-primary collection. Rescan to
-  refresh.
+- `'no_primary_set'` — emitted by `checkSanityGuard` when the
+  *current* primary is null and the run would do anything (file
+  action or empty-dir removal). Live signal — user marks a primary,
+  then can re-attempt.
+- `'primary_changed'` — emitted by `runQuarantineJob` whenever the
+  cached scan's `scanPrimaryId` differs from the current primary in
+  any direction (null→A, A→null, A→B). Stale signal — user must
+  rescan to refresh the plan even if a (possibly different) primary
+  is now set.
 - `'pct_exceeded'` — planned actions exceed the configured files /
-  bytes percentage of the primary collection.
+  bytes percentage of the current primary collection.
 - `null` when `passed === true`.
 
 `POST /api/quarantine/run` enforces the stale-plan refusal by

@@ -34,6 +34,7 @@ describe('purge', () => {
       scanRunId: scan.runId,
       actions: scan.actions,
       emptyDirs: scan.emptyDirActions,
+      scanPrimaryId: scan.scanPrimaryId,
     });
     return db;
   }

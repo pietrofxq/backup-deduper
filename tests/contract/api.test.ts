@@ -315,14 +315,15 @@ describe('API — scan + quarantine + restore', () => {
     db.client.close();
   });
 
-  it('M15 — stale-plan attack: scan with no primary, set primary, /quarantine/run refuses with code=no_primary_set', async () => {
+  it('M15 — stale-plan attack: scan with no primary, set primary, /quarantine/run refuses with code=primary_changed', async () => {
     // Regression for Copilot review on PR #6. The cached scan was taken
     // without a primary, so the planner used lex tiebreak. Setting a
     // primary AFTER the scan changes the DB state but not the cached
     // action list — applying it would quarantine files inside what is
-    // now the primary collection. The route MUST refuse on the cached
-    // sanityGuard.code === 'no_primary_set' even though re-checking
-    // current state would now pass.
+    // now the primary collection. The route MUST refuse based on
+    // cached scanPrimaryId (null) != current primary id, raising
+    // code=primary_changed (round-4 disambiguates this from the live
+    // no_primary_set case).
     await setup({
       'Backup-A/photo.jpg': 'photo',
       'Backup-B/photo.jpg': 'photo',
@@ -357,8 +358,8 @@ describe('API — scan + quarantine + restore', () => {
     expect(blocked.statusCode).toBe(400);
     const body = JSON.parse(blocked.body);
     expect(body.kind).toBe('sanity_guard');
-    expect(body.guard.code).toBe('no_primary_set');
-    expect(body.error).toMatch(/stale|re-?scan|cached/i);
+    expect(body.guard.code).toBe('primary_changed');
+    expect(body.error).toMatch(/changed since scan|rescan/i);
   });
 
   it('M15 round-3 — primary switched between scan and apply: /quarantine/run refuses with code=primary_changed', async () => {

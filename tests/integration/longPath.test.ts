@@ -68,6 +68,7 @@ describe.skipIf(!isWindows)('quarantine — Windows-only long-path handling', ()
         scanRunId: scan.runId,
         actions: scan.actions,
         emptyDirs: scan.emptyDirActions,
+        scanPrimaryId: scan.scanPrimaryId,
       });
       expect(result.summary.executed).toBeGreaterThanOrEqual(1);
       const active = listActiveActions(db, result.runId);

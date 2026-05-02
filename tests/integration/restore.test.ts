@@ -36,6 +36,7 @@ describe('restore', () => {
       scanRunId: scan.runId,
       actions: scan.actions,
       emptyDirs: scan.emptyDirActions,
+      scanPrimaryId: scan.scanPrimaryId,
     });
     return { db, scan, q };
   }
@@ -108,6 +109,7 @@ describe('restore', () => {
       scanRunId: scan.runId,
       actions: scan.actions,
       emptyDirs: scan.emptyDirActions,
+      scanPrimaryId: scan.scanPrimaryId,
     });
     const ids = listActiveActions(db, q.runId).map((a) => a.id);
     const r = bulkRestore({ db, targetRoot: root, actionIds: ids, allowSidecar: false });

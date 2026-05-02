@@ -116,6 +116,7 @@ describe('safety invariant — every primary byte-content remains reachable', ()
             scanRunId: scan.runId,
             actions: scan.actions,
             emptyDirs: scan.emptyDirActions,
+            scanPrimaryId: scan.scanPrimaryId,
             ignoreSanityGuard: true, // property test exercises pathological cases
           });
 

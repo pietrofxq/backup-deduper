@@ -20,20 +20,25 @@ export interface SanityGuardInput {
  * `reason` (a human-readable string) so the UI / clients can branch on a
  * stable identifier without parsing prose.
  *
- * - `no_primary_set`: `getPrimary` returned null but the planner emitted at
- *   least one action (or empty-dir removal). The dedup canonical-keeper
- *   logic falls back to lex tiebreak in that state — quarantining files
- *   (or rmdir'ing folders) without a deliberately chosen primary is
- *   exactly the footgun the sanity guard exists to prevent. Fail closed.
- *   Also the code raised at quarantine-time when the cached scan was
- *   taken without a primary, even if the user has since marked one (the
- *   action plan still reflects the lex-tiebroken keeper).
- * - `primary_changed`: the cached scan was taken with primary A but the
- *   current primary is B (or null). The classifier picked losers based
- *   on A; applying that plan would quarantine files inside what is now
- *   the user's source-of-truth collection. Refuse and require a rescan.
- * - `pct_exceeded`: planned actions exceed the configured files / bytes
- *   percentage of the primary collection.
+ * Each code has exactly one origin so clients can branch unambiguously
+ * without parsing prose:
+ *
+ * - `no_primary_set`: emitted by `checkSanityGuard` when current primary
+ *   is null AND the run would do anything (file action or empty-dir
+ *   removal). The dedup canonical-keeper logic falls back to lex
+ *   tiebreak in that state — quarantining (or rmdir'ing) without a
+ *   deliberately chosen primary is exactly the footgun the sanity
+ *   guard exists to prevent. Live signal — user just needs to mark a
+ *   primary, then can re-attempt.
+ * - `primary_changed`: emitted by `runQuarantineJob` whenever the
+ *   cached scan's `scanPrimaryId` differs from the current primary
+ *   (any direction — null→A, A→null, A→B). The classifier picked
+ *   losers relative to scan-time primary; applying that plan now
+ *   would quarantine files in the wrong anchor. Stale signal — user
+ *   must rescan to refresh the plan, even if they've already chosen
+ *   a (possibly different) primary.
+ * - `pct_exceeded`: planned actions exceed the configured files /
+ *   bytes percentage of the current primary collection.
  */
 export type SanityGuardCode = 'no_primary_set' | 'primary_changed' | 'pct_exceeded';
 

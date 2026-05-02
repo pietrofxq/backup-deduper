@@ -95,9 +95,10 @@ Refuses to run a quarantine pass when:
   primary-wins rule. Applying that stale plan after a primary switch
   could quarantine files inside the user's just-marked source-of-truth
   collection. `runQuarantineJob` compares `cached.scanPrimaryId` to
-  `getPrimary(db)?.id` and refuses on any mismatch (`code:
-  'no_primary_set'` when scan-time was null, `code: 'primary_changed'`
-  when both were set but differ). The user must rescan.
+  `getPrimary(db)?.id` and refuses on any mismatch with `code:
+  'primary_changed'` regardless of direction (`'no_primary_set'` is
+  reserved for the live no-primary signal from `checkSanityGuard` so
+  each code has exactly one origin). The user must rescan.
 - Planned actions would touch more than 50% of files **or** more than 70%
   of bytes of the primary collection (`code: 'pct_exceeded'`).
 

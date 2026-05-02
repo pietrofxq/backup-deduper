@@ -245,9 +245,17 @@ function NoPrimaryBanner({
   // Don't flash the banner during the first paint while collections are still
   // loading — only show it once we've confirmed there's no primary.
   if (!loaded || hasPrimary) return null;
+  // role="alert" + aria-live="assertive" so screen readers announce this
+  // safety-critical state change as soon as the collections query resolves
+  // without it. A plain <div> would only be reachable by manually moving
+  // focus into the region, which the user has no reason to do.
   return (
-    <div className="flex items-start gap-3 rounded-lg border-l-2 border-rose-500 bg-rose-500/10 px-4 py-3 text-sm text-rose-900 dark:text-rose-200">
-      <AlertTriangle size={16} className="mt-0.5 shrink-0" />
+    <div
+      role="alert"
+      aria-live="assertive"
+      className="flex items-start gap-3 rounded-lg border-l-2 border-rose-500 bg-rose-500/10 px-4 py-3 text-sm text-rose-900 dark:text-rose-200"
+    >
+      <AlertTriangle size={16} className="mt-0.5 shrink-0" aria-hidden="true" />
       <div>
         <p className="font-semibold">No primary collection set — quarantine disabled.</p>
         <p className="mt-0.5 text-xs leading-relaxed">

@@ -4,11 +4,7 @@ import { executeQuarantine, type QuarantineSummary } from '../mover/quarantine.j
 import type { EmptyDir, PlannedAction } from '../classifier/rules.js';
 import { loadConfig, saveConfig } from '../config/loader.js';
 import { CONFIRMATION_PHRASE } from '../config/schema.js';
-import {
-  checkSanityGuard,
-  type SanityGuardCode,
-  type SanityGuardResult,
-} from './sanityGuard.js';
+import { checkSanityGuard, type SanityGuardResult } from './sanityGuard.js';
 import { appendAudit } from '../audit/log.js';
 import { parseSqliteDatetime } from '../db/datetime.js';
 
@@ -40,20 +36,22 @@ export interface QuarantineJobInput {
   ignoreSanityGuard?: boolean;
   /**
    * The primary collection id at the time the scan was classified, or
-   * null if no primary was set. The classifier's keeper-picking is
-   * shaped by this — losers under cross-collection dedup are chosen
+   * null if no primary was set then. The classifier's keeper-picking
+   * is shaped by this — losers under cross-collection dedup are chosen
    * relative to which collection is primary, AND the within-collection
    * canonical winner respects the primary's path priority. If the user
    * has switched primary (or set one for the first time, or cleared
    * it) since the scan, the cached plan is stale: applying it would
    * quarantine files inside what is now the source-of-truth collection.
    *
-   * If `undefined`, the comparison is skipped (used by unit/property
-   * tests that construct the input directly). Production callers (the
-   * `/api/quarantine/run` route) MUST pass it — they read it from the
-   * cached `ScanJobResult.scanPrimaryId`.
+   * REQUIRED. Made required intentionally so future call sites cannot
+   * silently bypass the stale-plan check by omitting the field.
+   * Callers that don't have a real scan run (property tests, fixtures
+   * that construct PlannedActions by hand) should still pass an
+   * explicit value — typically the current primary id read from the
+   * DB, since their plans are constructed *against* that state.
    */
-  scanPrimaryId?: number | null;
+  scanPrimaryId: number | null;
 }
 
 export interface QuarantineJobResult {
@@ -83,25 +81,18 @@ export function runQuarantineJob(input: QuarantineJobInput): QuarantineJobResult
   // under the limits, so the run would silently proceed against a stale
   // plan. The only signal that survives is the scan-time primary id —
   // compare it to the current primary and refuse on any mismatch.
-  if (input.scanPrimaryId !== undefined && !input.ignoreSanityGuard) {
+  //
+  // The code is always `primary_changed` (every direction: null→A,
+  // A→null, A→B); `no_primary_set` is reserved for the live signal
+  // emitted by `checkSanityGuard` so each code has exactly one origin.
+  if (!input.ignoreSanityGuard) {
     const currentPrimaryId = getPrimary(db)?.id ?? null;
     if (input.scanPrimaryId !== currentPrimaryId) {
-      // Distinguish "scan was made without a primary" from "primary
-      // changed". Both are stale; both refuse; the codes give clients
-      // a stable enum to branch on for UI copy / analytics.
-      const code: SanityGuardCode =
-        input.scanPrimaryId === null ? 'no_primary_set' : 'primary_changed';
       const reason =
-        input.scanPrimaryId === null
-          ? 'Scan was taken without a primary collection; the cached action plan' +
-            ' reflects a lex-tiebroken keeper rather than a deliberate primary.' +
-            ' Rescan after marking a primary, or pass ignoreSanityGuard=true to' +
-            ' apply the stale plan.'
-          : `Primary collection changed since scan (scan-time id=${input.scanPrimaryId},` +
-            ` current id=${currentPrimaryId ?? 'null'}); the cached action plan was` +
-            ' shaped around the old primary and would now quarantine files inside' +
-            ' the newly-marked source-of-truth collection. Rescan to refresh, or' +
-            ' pass ignoreSanityGuard=true to apply the stale plan.';
+        `Primary collection state changed since scan (scan-time id=${input.scanPrimaryId ?? 'null'},` +
+        ` current id=${currentPrimaryId ?? 'null'}); the cached action plan was shaped` +
+        ' around the scan-time primary and would now apply against a different anchor.' +
+        ' Rescan to refresh, or pass ignoreSanityGuard=true to apply the stale plan.';
       throw new SanityGuardError(reason, {
         passed: false,
         primaryFiles: 0,
@@ -111,7 +102,7 @@ export function runQuarantineJob(input: QuarantineJobInput): QuarantineJobResult
         filesPct: 0,
         bytesPct: 0,
         reason,
-        code,
+        code: 'primary_changed',
       });
     }
   }

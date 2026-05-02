@@ -134,6 +134,7 @@ describe.skipIf(!isWindows)('quarantine — Windows-only locked-file handling', 
         scanRunId: scan.runId,
         actions: scan.actions,
         emptyDirs: scan.emptyDirActions,
+        scanPrimaryId: scan.scanPrimaryId,
       });
       // The locked file's action must be in the errored count, not silently skipped.
       expect(result.summary.errored).toBeGreaterThanOrEqual(1);

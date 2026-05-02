@@ -216,6 +216,26 @@ describe('DashboardPage', () => {
     ).toBeInTheDocument();
   });
 
+  it('renders the no-primary banner as a screen-reader-announced alert (M15 round-4 a11y)', async () => {
+    // The banner is a safety-critical state change; screen readers MUST be
+    // told. role="alert" + aria-live ensure announcement when the element
+    // appears after the async collections query resolves.
+    const api = buildMockApi({
+      health: vi.fn().mockResolvedValue(baseHealth),
+      getConfig: vi.fn().mockResolvedValue(baseConfig),
+      listCollections: vi.fn().mockResolvedValue(
+        collections.map((c) => ({ ...c, isPrimary: false })),
+      ),
+      listScans: vi.fn().mockResolvedValue([]),
+    });
+
+    renderWithProviders(<DashboardPage />, { api });
+
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent(/no primary collection set/i);
+    expect(alert).toHaveAttribute('aria-live', 'assertive');
+  });
+
   it('hides the no-primary banner once a primary is selected', async () => {
     const api = buildMockApi({
       health: vi.fn().mockResolvedValue(baseHealth),

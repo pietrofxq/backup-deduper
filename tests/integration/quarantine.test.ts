@@ -52,6 +52,7 @@ describe('quarantine — two-phase commit happy path', () => {
         scanRunId: scan.runId,
         actions: scan.actions,
         emptyDirs: scan.emptyDirActions,
+        scanPrimaryId: scan.scanPrimaryId,
       }),
     ).toThrow(DryRunGateError);
     db.client.close();
@@ -70,6 +71,7 @@ describe('quarantine — two-phase commit happy path', () => {
       scanRunId: scan.runId,
       actions: scan.actions,
       emptyDirs: scan.emptyDirActions,
+      scanPrimaryId: scan.scanPrimaryId,
     });
     expect(result.summary.executed).toBe(scan.actions.length);
     expect(result.summary.errored).toBe(0);
@@ -110,6 +112,7 @@ describe('quarantine — two-phase commit happy path', () => {
       scanRunId: scan.runId,
       actions: scan.actions,
       emptyDirs: scan.emptyDirActions,
+      scanPrimaryId: scan.scanPrimaryId,
     });
     // The file was protected by re-hash check.
     expect(result.summary.skippedHashMismatch).toBe(1);
@@ -142,6 +145,7 @@ describe('quarantine — two-phase commit happy path', () => {
         scanRunId: scan.runId,
         actions: scan.actions,
         emptyDirs: scan.emptyDirActions,
+        scanPrimaryId: scan.scanPrimaryId,
       }),
     ).toThrow(SanityGuardError);
 
@@ -152,6 +156,7 @@ describe('quarantine — two-phase commit happy path', () => {
       scanRunId: scan.runId,
       actions: scan.actions,
       emptyDirs: scan.emptyDirActions,
+      scanPrimaryId: scan.scanPrimaryId,
       ignoreSanityGuard: true,
     });
     expect(result.summary.executed).toBeGreaterThan(0);
@@ -186,11 +191,15 @@ describe('quarantine — two-phase commit happy path', () => {
         scanRunId: scan.runId,
         actions: scan.actions,
         emptyDirs: scan.emptyDirActions,
+        scanPrimaryId: scan.scanPrimaryId,
       });
     } catch (err) {
       thrown = err;
     }
     expect(thrown).toBeInstanceOf(SanityGuardError);
+    // Both scan-time and current primary are null here, so the
+    // primary-change check passes. The live `checkSanityGuard` then
+    // catches it (current null + actions > 0 → no_primary_set).
     expect((thrown as SanityGuardError).guard.code).toBe('no_primary_set');
     db.client.close();
   });
@@ -241,8 +250,13 @@ describe('quarantine — two-phase commit happy path', () => {
       thrown = err;
     }
     expect(thrown).toBeInstanceOf(SanityGuardError);
-    expect((thrown as SanityGuardError).guard.code).toBe('no_primary_set');
-    expect((thrown as SanityGuardError).message).toMatch(/stale|re-?scan|cached/i);
+    // Stale-plan refusal always raises `primary_changed` (round-4
+    // change): the live `no_primary_set` code is reserved for
+    // checkSanityGuard's current-state check. Here the cached scan-time
+    // primary (null) differs from current (just-set primary), so the
+    // mismatch path fires.
+    expect((thrown as SanityGuardError).guard.code).toBe('primary_changed');
+    expect((thrown as SanityGuardError).message).toMatch(/changed since scan|rescan/i);
 
     // The override flag still bypasses (escape hatch for advanced users).
     const result = runQuarantineJob({
@@ -251,7 +265,7 @@ describe('quarantine — two-phase commit happy path', () => {
       scanRunId: scan.runId,
       actions: scan.actions,
       emptyDirs: scan.emptyDirActions,
-      scanGuard: scan.sanityGuard,
+      scanPrimaryId: scan.scanPrimaryId,
       ignoreSanityGuard: true,
     });
     expect(result.summary.executed).toBeGreaterThanOrEqual(0);
@@ -340,6 +354,7 @@ describe('quarantine — two-phase commit happy path', () => {
       scanRunId: scan.runId,
       actions: scan.actions,
       emptyDirs: scan.emptyDirActions,
+      scanPrimaryId: scan.scanPrimaryId,
     });
     expect(result.summary.emptyDirsRemoved).toBe(1);
     expect(fs.existsSync(path.join(root, 'Backup-A/EmptyFolder'))).toBe(false);
@@ -356,6 +371,7 @@ describe('quarantine — two-phase commit happy path', () => {
       scanRunId: scan.runId,
       actions: scan.actions,
       emptyDirs: scan.emptyDirActions,
+      scanPrimaryId: scan.scanPrimaryId,
     });
     const active = listActiveActions(db, result.runId);
     expect(active.length).toBe(scan.actions.length);
