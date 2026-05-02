@@ -79,13 +79,18 @@ non-destructive.
 
 ### 5. Sanity guard
 
-Refuses to run a quarantine pass that would touch >50% of files **or** >70%
-of bytes of the primary collection, unless explicitly overridden.
+Refuses to run a quarantine pass when:
 
-[src/orchestrator/sanityGuard.ts:28–87](../src/orchestrator/sanityGuard.ts).
+- No primary collection is set **and** at least one action would fire
+  (`code: 'no_primary_set'`). Without a primary, the dedup tiebreak has no
+  anchor — quarantining files in that state is exactly the footgun this
+  guard exists to prevent. Vacuous (zero-action) runs still pass.
+- Planned actions would touch more than 50% of files **or** more than 70%
+  of bytes of the primary collection (`code: 'pct_exceeded'`).
 
-> **Watch out:** if no primary is set, the guard passes vacuously. This is a
-> known hole — see [known-gaps.md](known-gaps.md) #SG-1.
+Both are bypassable via the explicit `ignoreSanityGuard: true` override.
+
+[src/orchestrator/sanityGuard.ts:49–129](../src/orchestrator/sanityGuard.ts).
 
 ### 6. Restore never overwrites
 

@@ -315,6 +315,46 @@ describe('API — scan + quarantine + restore', () => {
     db.client.close();
   });
 
+  it('M15 — POST /quarantine/run with no primary set returns 400 sanity_guard with code=no_primary_set', async () => {
+    // Deliberately skip the set-primary call. With actions emitted by the
+    // classifier (cross-collection duplicate), the guard must refuse.
+    await setup({
+      'Backup-A/photo.jpg': 'photo',
+      'Backup-B/photo.jpg': 'photo',
+    });
+    // Disable dry-run so the only remaining gate is the sanity guard. Without
+    // this, the route would 400 with kind=dry_run_gate first.
+    await app.inject({
+      method: 'POST',
+      url: '/api/config/disable-dry-run',
+      payload: { phrase: 'I have reviewed the dry-run report' },
+    });
+    const scanResp = await app.inject({ method: 'POST', url: '/api/scans', payload: {} });
+    expect(scanResp.statusCode).toBe(200);
+    const scan = JSON.parse(scanResp.body);
+    expect(scan.report.sanityGuard.passed).toBe(false);
+    expect(scan.report.sanityGuard.code).toBe('no_primary_set');
+
+    const qResp = await app.inject({
+      method: 'POST',
+      url: '/api/quarantine/run',
+      payload: { scanRunId: scan.runId },
+    });
+    expect(qResp.statusCode).toBe(400);
+    const body = JSON.parse(qResp.body);
+    expect(body.kind).toBe('sanity_guard');
+    expect(body.guard.code).toBe('no_primary_set');
+    // ignoreSanityGuard=true must still bypass — keeps the override hatch
+    // working for the user who knows what they're doing (out-of-band cleanup
+    // before they've marked a primary).
+    const overridden = await app.inject({
+      method: 'POST',
+      url: '/api/quarantine/run',
+      payload: { scanRunId: scan.runId, ignoreSanityGuard: true },
+    });
+    expect(overridden.statusCode).toBe(200);
+  });
+
   it('GET /scans returns the run history; GET /scans/:id returns the run + report', async () => {
     await setup({ 'A/x.txt': 'a' });
     const r = await app.inject({ method: 'POST', url: '/api/scans', payload: {} });

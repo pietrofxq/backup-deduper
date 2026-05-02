@@ -132,6 +132,7 @@ describe('quarantine — two-phase commit happy path', () => {
     setPrimary(db, a.id);
     const scan = await runScanJob(db, root, { dryRun: true });
     expect(scan.sanityGuard.passed).toBe(false);
+    expect(scan.sanityGuard.code).toBe('pct_exceeded');
 
     disableDryRun(db, 'I have reviewed the dry-run report', root);
     expect(() =>
@@ -154,6 +155,43 @@ describe('quarantine — two-phase commit happy path', () => {
       ignoreSanityGuard: true,
     });
     expect(result.summary.executed).toBeGreaterThan(0);
+    db.client.close();
+  });
+
+  it('M15 — sanity guard fails closed when no primary is set and actions are non-empty', async () => {
+    // Two collections, identical file content in both. With no primary, the
+    // dedup tiebreak still emits a duplicate_cross_collection action — this
+    // is the dangerous shape SG-1 / M15 fixed.
+    buildTree(root, {
+      'Backup-A/photo.jpg': 'photo',
+      'Backup-B/photo.jpg': 'photo',
+    });
+    await boot({ targetRoot: root, noServe: true });
+    const db = openDb(root);
+    syncCollectionsTable(db, root);
+    // Deliberately do NOT call setPrimary.
+    const scan = await runScanJob(db, root, { dryRun: true });
+    expect(scan.actions.length).toBeGreaterThan(0);
+    expect(scan.sanityGuard.passed).toBe(false);
+    expect(scan.sanityGuard.code).toBe('no_primary_set');
+    expect(scan.sanityGuard.reason).toMatch(/no primary collection set/i);
+
+    // Disabling dry-run does NOT defeat the guard — it must still refuse.
+    disableDryRun(db, 'I have reviewed the dry-run report', root);
+    let thrown: unknown = null;
+    try {
+      runQuarantineJob({
+        db,
+        targetRoot: root,
+        scanRunId: scan.runId,
+        actions: scan.actions,
+        emptyDirs: scan.emptyDirActions,
+      });
+    } catch (err) {
+      thrown = err;
+    }
+    expect(thrown).toBeInstanceOf(SanityGuardError);
+    expect((thrown as SanityGuardError).guard.code).toBe('no_primary_set');
     db.client.close();
   });
 

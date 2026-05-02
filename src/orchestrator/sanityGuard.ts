@@ -7,6 +7,21 @@ export interface SanityGuardInput {
   bytesPctLimit: number; // e.g. 0.7
 }
 
+/**
+ * Structured failure code for a tripped sanity guard. Kept separate from
+ * `reason` (a human-readable string) so the UI / clients can branch on a
+ * stable identifier without parsing prose.
+ *
+ * - `no_primary_set`: `getPrimary` returned null but the planner emitted at
+ *   least one action. The dedup canonical-keeper logic falls back to lex
+ *   tiebreak in that state — quarantining files without a deliberately
+ *   chosen primary is exactly the footgun the sanity guard exists to
+ *   prevent. Fail closed.
+ * - `pct_exceeded`: planned actions exceed the configured files / bytes
+ *   percentage of the primary collection.
+ */
+export type SanityGuardCode = 'no_primary_set' | 'pct_exceeded';
+
 export interface SanityGuardResult {
   passed: boolean;
   primaryFiles: number;
@@ -16,12 +31,18 @@ export interface SanityGuardResult {
   filesPct: number;
   bytesPct: number;
   reason: string | null;
+  /** Stable identifier when `passed === false`. Null when `passed === true`. */
+  code: SanityGuardCode | null;
 }
 
 /**
- * Refuses to run a quarantine pass if the planned actions would touch more
- * than `filesPctLimit` of the primary collection's file count OR more than
- * `bytesPctLimit` of its byte total.
+ * Refuses to run a quarantine pass if either:
+ *   1. there is no primary set AND the run would emit at least one action
+ *      (would-be a vacuous pass — the dedup tiebreak runs without an
+ *      anchor, leaving the user no "this is the safe baseline" guarantee), OR
+ *   2. the planned actions would touch more than `filesPctLimit` of the
+ *      primary collection's file count OR more than `bytesPctLimit` of its
+ *      byte total.
  *
  * Returns a structured result; caller decides whether to abort or override.
  */
@@ -31,16 +52,37 @@ export function checkSanityGuard(
   input: SanityGuardInput,
 ): SanityGuardResult {
   const primary = getPrimary(db);
+  const plannedBytes = actions.reduce((a, b) => a + b.size, 0);
   if (!primary) {
+    // No-op runs (no actions emitted) are safe regardless of primary state —
+    // the user hasn't been prompted to confirm anything yet. A populated
+    // run without a primary IS dangerous: the canonical-keeper picker has
+    // no anchor, so a duplicate-cross-collection action could quarantine a
+    // file the user thought of as their source of truth.
+    if (actions.length === 0) {
+      return {
+        passed: true,
+        primaryFiles: 0,
+        primaryBytes: 0,
+        plannedFiles: 0,
+        plannedBytes: 0,
+        filesPct: 0,
+        bytesPct: 0,
+        reason: null,
+        code: null,
+      };
+    }
     return {
-      passed: true,
+      passed: false,
       primaryFiles: 0,
       primaryBytes: 0,
       plannedFiles: actions.length,
-      plannedBytes: actions.reduce((a, b) => a + b.size, 0),
+      plannedBytes,
       filesPct: 0,
       bytesPct: 0,
-      reason: null,
+      reason:
+        'no primary collection set; mark one as primary before running quarantine',
+      code: 'no_primary_set',
     };
   }
   const primaryFiles = listFilesInCollection(db, primary.id);
@@ -51,10 +93,10 @@ export function checkSanityGuard(
   // target the primary (within-collection dedup or its rare cruft).
   const primaryActions = actions.filter((a) => a.collection.id === primary.id);
   const plannedFiles = primaryActions.length;
-  const plannedBytes = primaryActions.reduce((a, b) => a + b.size, 0);
+  const primaryPlannedBytes = primaryActions.reduce((a, b) => a + b.size, 0);
 
   const filesPct = primaryFileCount === 0 ? 0 : plannedFiles / primaryFileCount;
-  const bytesPct = primaryBytes === 0 ? 0 : plannedBytes / primaryBytes;
+  const bytesPct = primaryBytes === 0 ? 0 : primaryPlannedBytes / primaryBytes;
 
   const filesTrip = filesPct > input.filesPctLimit;
   const bytesTrip = bytesPct > input.bytesPctLimit;
@@ -64,13 +106,14 @@ export function checkSanityGuard(
       primaryFiles: primaryFileCount,
       primaryBytes,
       plannedFiles,
-      plannedBytes,
+      plannedBytes: primaryPlannedBytes,
       filesPct,
       bytesPct,
       reason:
         (filesTrip ? `files ${(filesPct * 100).toFixed(1)}% > ${(input.filesPctLimit * 100).toFixed(0)}%` : '') +
         (filesTrip && bytesTrip ? ' and ' : '') +
         (bytesTrip ? `bytes ${(bytesPct * 100).toFixed(1)}% > ${(input.bytesPctLimit * 100).toFixed(0)}%` : ''),
+      code: 'pct_exceeded',
     };
   }
 
@@ -79,9 +122,10 @@ export function checkSanityGuard(
     primaryFiles: primaryFileCount,
     primaryBytes,
     plannedFiles,
-    plannedBytes,
+    plannedBytes: primaryPlannedBytes,
     filesPct,
     bytesPct,
     reason: null,
+    code: null,
   };
 }

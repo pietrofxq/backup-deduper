@@ -47,6 +47,12 @@ const SanityGuard = z.object({
   filesPct: z.number(),
   bytesPct: z.number(),
   reason: z.string().nullable(),
+  /**
+   * Stable identifier for the failure mode when `passed === false`. Lets the
+   * UI branch on a fixed enum (`no_primary_set` → "set a primary first" CTA;
+   * `pct_exceeded` → override checkbox) without parsing `reason` prose.
+   */
+  code: z.enum(['no_primary_set', 'pct_exceeded']).nullable(),
 });
 
 export const DryRunReport = z.object({

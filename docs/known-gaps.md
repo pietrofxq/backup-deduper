@@ -23,7 +23,7 @@ or moved into the ROADMAP backlog table.
 
 | # | location | issue |
 |---|----------|-------|
-| SG-1 | [src/orchestrator/sanityGuard.ts:34–45](../src/orchestrator/sanityGuard.ts) | `checkSanityGuard` returns `passed: true` when no primary collection is set. A `target_root` with no primary has zero sanity-guarding — a quarantine pass over the entire tree is permitted vacuously. **Should fail-closed**: refuse the run with a structured error when there is no primary. |
+| ~~SG-1~~ | ~~[src/orchestrator/sanityGuard.ts:34–45](../src/orchestrator/sanityGuard.ts)~~ | ~~`checkSanityGuard` returns `passed: true` when no primary collection is set.~~ ✅ closed by M15: `checkSanityGuard` now returns `passed: false` with `code: 'no_primary_set'` when there's no primary AND at least one action would fire; vacuous (zero-action) runs still pass. |
 | RV-1 | [src/mover/restore.ts:119](../src/mover/restore.ts) | Audit event is `restore_skipped` even though the function returns `kind:'restored'` (live tree already had matching content). The DB row is correctly marked `restored_at`. The audit/return-shape disagreement is confusing for grep-based audit review. |
 | HM-1 | [src/mover/quarantine.ts:146](../src/mover/quarantine.ts), [restore.ts:90](../src/mover/restore.ts), [reconcile.ts:98](../src/mover/reconcile.ts) | `hashFileSync` blocks the event loop on every quarantine/restore/reconcile action. ROADMAP #13 covers worker-threading the **scanner** pool; the mover side is not tracked. For multi-GB files this stalls SSE and request handling. |
 | RR-1 | route `/api/quarantine/run` 404 message | The error tells the user "re-run /api/scans first (server restarts clear the cache)" — but if the user disabled dry-run between the lost scan and the re-scan, the new scan re-evaluates the whole config. Behavior is correct; the message could mention this so a user doesn't expect identical actions on re-scan. Symptom of [decisions/0008-in-memory-runStore.md](decisions/0008-in-memory-runStore.md). |
@@ -34,8 +34,10 @@ or moved into the ROADMAP backlog table.
 
 ## Deferred test coverage
 
-- No test asserting `checkSanityGuard` blocks when no primary is set
-  (will fail today — the bug at SG-1 makes the assertion impossible).
+- ~~No test asserting `checkSanityGuard` blocks when no primary is set~~
+  ✅ closed by M15 — covered by `tests/unit/sanityGuard.test.ts`,
+  `tests/integration/quarantine.test.ts` (M15 case), and
+  `tests/contract/api.test.ts` (M15 case).
 - No test asserting `hashFileSync` is in fact called for very large files
   (would catch a hypothetical regression to "skip rehash on big files").
 - No Playwright/headless-browser assertion for the type-to-confirm modal —

@@ -142,6 +142,10 @@ export function DashboardPage() {
         description="Live state of the target_root. Run a scan to refresh."
       />
 
+      <NoPrimaryBanner
+        loaded={collections.isSuccess}
+        hasPrimary={primary !== null}
+      />
       <DryRunBanner dryRun={config.data?.dry_run ?? true} />
 
       {/* Stat tiles */}
@@ -227,6 +231,32 @@ function PageHeader({
       {description && (
         <p className="mt-1 text-sm text-(--color-text-muted)">{description}</p>
       )}
+    </div>
+  );
+}
+
+function NoPrimaryBanner({
+  loaded,
+  hasPrimary,
+}: {
+  loaded: boolean;
+  hasPrimary: boolean;
+}) {
+  // Don't flash the banner during the first paint while collections are still
+  // loading — only show it once we've confirmed there's no primary.
+  if (!loaded || hasPrimary) return null;
+  return (
+    <div className="flex items-start gap-3 rounded-lg border-l-2 border-rose-500 bg-rose-500/10 px-4 py-3 text-sm text-rose-900 dark:text-rose-200">
+      <AlertTriangle size={16} className="mt-0.5 shrink-0" />
+      <div>
+        <p className="font-semibold">No primary collection set — quarantine disabled.</p>
+        <p className="mt-0.5 text-xs leading-relaxed">
+          Pick the collection that holds your source-of-truth data in
+          <span className="mx-1 font-medium">Settings</span>
+          before running a scan. Without a primary, the dedup tiebreak has no
+          anchor.
+        </p>
+      </div>
     </div>
   );
 }
@@ -529,11 +559,17 @@ function LastScanSummary({
 
         {!sg.passed && sg.reason && (
           <div className="rounded-md border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-xs text-rose-900 dark:text-rose-200">
-            <p className="font-semibold">Sanity guard tripped:</p>
-            <p className="mt-0.5 leading-relaxed">{sg.reason}</p>
-            <p className="mt-1.5 tabular-nums">
-              files {formatPercent(sg.filesPct)} · bytes {formatPercent(sg.bytesPct)}
+            <p className="font-semibold">
+              {sg.code === 'no_primary_set'
+                ? 'Quarantine refused — no primary set:'
+                : 'Sanity guard tripped:'}
             </p>
+            <p className="mt-0.5 leading-relaxed">{sg.reason}</p>
+            {sg.code !== 'no_primary_set' && (
+              <p className="mt-1.5 tabular-nums">
+                files {formatPercent(sg.filesPct)} · bytes {formatPercent(sg.bytesPct)}
+              </p>
+            )}
           </div>
         )}
 

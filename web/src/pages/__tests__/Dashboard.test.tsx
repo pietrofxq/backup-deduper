@@ -113,6 +113,7 @@ describe('DashboardPage', () => {
         filesPct: 0.06,
         bytesPct: 0.06,
         reason: null,
+        code: null,
       },
       scanSummary: {
         totalFiles: 50,
@@ -195,5 +196,39 @@ describe('DashboardPage', () => {
     const button = await screen.findByRole('button', { name: /scan now/i });
     await waitFor(() => expect(button).toBeDisabled());
     expect(screen.getByText(/none — set one first/i)).toBeInTheDocument();
+  });
+
+  it('shows the no-primary banner when none is selected (M15)', async () => {
+    const api = buildMockApi({
+      health: vi.fn().mockResolvedValue(baseHealth),
+      getConfig: vi.fn().mockResolvedValue(baseConfig),
+      listCollections: vi.fn().mockResolvedValue(
+        collections.map((c) => ({ ...c, isPrimary: false })),
+      ),
+      listScans: vi.fn().mockResolvedValue([]),
+    });
+
+    renderWithProviders(<DashboardPage />, { api });
+
+    expect(
+      await screen.findByText(/no primary collection set — quarantine disabled/i),
+    ).toBeInTheDocument();
+  });
+
+  it('hides the no-primary banner once a primary is selected', async () => {
+    const api = buildMockApi({
+      health: vi.fn().mockResolvedValue(baseHealth),
+      getConfig: vi.fn().mockResolvedValue(baseConfig),
+      listCollections: vi.fn().mockResolvedValue(collections),
+      listScans: vi.fn().mockResolvedValue([]),
+    });
+
+    renderWithProviders(<DashboardPage />, { api });
+
+    // Wait for the dry-run banner to render so collections finished loading.
+    await screen.findByText(/Dry-run is enabled/i);
+    expect(
+      screen.queryByText(/no primary collection set — quarantine disabled/i),
+    ).toBeNull();
   });
 });
