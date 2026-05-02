@@ -91,6 +91,16 @@ export interface ScanJobResult {
   emptyDirActions: EmptyDir[];
   sanityGuard: SanityGuardResult;
   reportPath: string;
+  /**
+   * The primary collection id at the time this scan was classified, or
+   * null if no primary was set. The classifier's keeper-picking is
+   * shaped by this, so an action plan made under primary A is **not**
+   * applicable after the user switches to primary B (the losers were
+   * chosen relative to A's path priority and the cross-collection
+   * primary-wins rule). `runQuarantineJob` compares this to the
+   * current primary and refuses on any mismatch.
+   */
+  scanPrimaryId: number | null;
 }
 
 /**
@@ -146,6 +156,13 @@ export async function runScanJob(
     opts.onProgress?.({ type: 'phase', phase: 'classify' });
     const collections = listCollections(db);
     const files = listAllLiveFiles(db);
+    // Capture the primary at scan time. The classifier shapes the action
+    // plan around this — losers under cross-collection dedup are picked
+    // relative to which collection is primary right now. `runQuarantineJob`
+    // compares this against current primary at apply time and refuses on
+    // any mismatch (the cached plan would otherwise quarantine files
+    // inside the user's newly-marked source-of-truth collection).
+    const scanPrimaryId = collections.find((c) => c.is_primary === 1)?.id ?? null;
 
     const emptyDirs: Array<{ collectionId: number; relPath: string }> = [];
     for (const [cid, paths] of scan.emptyDirsByCollection) {
@@ -189,6 +206,7 @@ export async function runScanJob(
     const sg = checkSanityGuard(db, cls.actions, {
       filesPctLimit: cfg.sanity_guard_files_pct,
       bytesPctLimit: cfg.sanity_guard_bytes_pct,
+      emptyDirCount: cls.emptyDirActions.length,
     });
 
     const report: DryRunReport = {
@@ -263,6 +281,7 @@ export async function runScanJob(
       emptyDirActions: cls.emptyDirActions,
       sanityGuard: sg,
       reportPath,
+      scanPrimaryId,
     };
   } catch (err) {
     // The scanner throws the AbortSignal's `reason` directly when cancelled

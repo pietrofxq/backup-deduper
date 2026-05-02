@@ -116,6 +116,7 @@ describe('safety invariant — every primary byte-content remains reachable', ()
             scanRunId: scan.runId,
             actions: scan.actions,
             emptyDirs: scan.emptyDirActions,
+            scanPrimaryId: scan.scanPrimaryId,
             ignoreSanityGuard: true, // property test exercises pathological cases
           });
 
@@ -161,7 +162,16 @@ describe('safety invariant — every primary byte-content remains reachable', ()
       }),
       { numRuns: NUM_RUNS, verbose: true },
     );
-  }, 120_000);
+  }, 300_000);
+  // 5-minute budget. Each iteration mkdirs + writes files + boots + scans +
+  // quarantines + closes the DB + rmRfs. Windows fs ops are slow and
+  // GitHub-Actions runner perf is variable enough that the same test ran
+  // for 27s on a windows-latest/Node 20 runner one day and 135s on the
+  // next. Numbers stay in the same ballpark on macOS (~1-2s here, ~3-4s
+  // on Windows), so this only matters when CI hits a slow runner. The
+  // numRuns=500 thorough Linux job catches deeper edges; the per-PR
+  // matrix just needs a budget that honest Windows variance can fit
+  // inside.
 });
 
 /**

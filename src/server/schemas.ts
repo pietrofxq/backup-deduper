@@ -47,6 +47,20 @@ const SanityGuard = z.object({
   filesPct: z.number(),
   bytesPct: z.number(),
   reason: z.string().nullable(),
+  /**
+   * Stable identifier for the failure mode when `passed === false`. Lets the
+   * UI branch on a fixed enum without parsing `reason` prose:
+   *
+   * - `no_primary_set` → "Set a primary first" CTA. Fired when the scan was
+   *   taken with no primary, regardless of current state.
+   * - `primary_changed` → "Primary changed since scan; rescan to refresh."
+   *   Fired when scan-time primary differs from current primary (both set
+   *   to different ids).
+   * - `pct_exceeded` → override checkbox.
+   */
+  code: z
+    .enum(['no_primary_set', 'primary_changed', 'pct_exceeded'])
+    .nullable(),
 });
 
 export const DryRunReport = z.object({

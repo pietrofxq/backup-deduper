@@ -79,13 +79,36 @@ non-destructive.
 
 ### 5. Sanity guard
 
-Refuses to run a quarantine pass that would touch >50% of files **or** >70%
-of bytes of the primary collection, unless explicitly overridden.
+Refuses to run a quarantine pass when:
 
-[src/orchestrator/sanityGuard.ts:28–87](../src/orchestrator/sanityGuard.ts).
+- No primary collection is set **and** the run would do anything to the
+  tree — at least one file action OR at least one empty-directory removal
+  (`code: 'no_primary_set'`). Without a primary, the dedup tiebreak has no
+  anchor — quarantining files (or rmdir'ing folders) in that state is
+  exactly the footgun this guard exists to prevent. Vacuous (zero-action,
+  zero-emptyDir) runs still pass.
+- The cached scan's primary id differs from the current primary (any
+  shift counts: null→A, A→B, A→null). The classifier shapes its keeper-
+  picking around whichever collection was primary at scan time — the
+  within-collection canonical winner respects the primary's path
+  priority, and cross-collection dedup picks losers relative to the
+  primary-wins rule. Applying that stale plan after a primary switch
+  could quarantine files inside the user's just-marked source-of-truth
+  collection. `runQuarantineJob` compares `cached.scanPrimaryId` to
+  `getPrimary(db)?.id` and refuses on any mismatch with `code:
+  'primary_changed'` regardless of direction (`'no_primary_set'` is
+  reserved for the live no-primary signal from `checkSanityGuard` so
+  each code has exactly one origin). The user must rescan.
+- Planned actions would touch more than 50% of files **or** more than 70%
+  of bytes of the primary collection (`code: 'pct_exceeded'`).
 
-> **Watch out:** if no primary is set, the guard passes vacuously. This is a
-> known hole — see [known-gaps.md](known-gaps.md) #SG-1.
+All three are bypassable via the explicit `ignoreSanityGuard: true`
+override.
+
+[src/orchestrator/sanityGuard.ts](../src/orchestrator/sanityGuard.ts) +
+[src/orchestrator/quarantineJob.ts](../src/orchestrator/quarantineJob.ts)
+(stale-plan refusal lives in the job, not the guard, because the cached
+scan-time guard is the canonical signal).
 
 ### 6. Restore never overwrites
 

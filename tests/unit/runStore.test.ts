@@ -30,6 +30,7 @@ function fakeResult(runId: number): ScanJobResult {
         filesPct: 0,
         bytesPct: 0,
         reason: null,
+        code: null,
       },
       scanSummary: { totalFiles: 0, totalHashed: 0, totalCached: 0, durationMs: 0 },
       actions: [],
@@ -47,8 +48,10 @@ function fakeResult(runId: number): ScanJobResult {
       filesPct: 0,
       bytesPct: 0,
       reason: null,
+      code: null,
     },
     reportPath: '/tmp/x',
+    scanPrimaryId: null,
   };
 }
 

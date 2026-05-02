@@ -244,6 +244,7 @@ describe('reconcile — crash recovery cases', () => {
       scanRunId: scan.runId,
       actions: scan.actions,
       emptyDirs: scan.emptyDirActions,
+      scanPrimaryId: scan.scanPrimaryId,
     });
 
     // Existing actions are already executed; reconcile should not touch them.

@@ -315,6 +315,149 @@ describe('API — scan + quarantine + restore', () => {
     db.client.close();
   });
 
+  it('M15 — stale-plan attack: scan with no primary, set primary, /quarantine/run refuses with code=primary_changed', async () => {
+    // Regression for Copilot review on PR #6. The cached scan was taken
+    // without a primary, so the planner used lex tiebreak. Setting a
+    // primary AFTER the scan changes the DB state but not the cached
+    // action list — applying it would quarantine files inside what is
+    // now the primary collection. The route MUST refuse based on
+    // cached scanPrimaryId (null) != current primary id, raising
+    // code=primary_changed (round-4 disambiguates this from the live
+    // no_primary_set case).
+    await setup({
+      'Backup-A/photo.jpg': 'photo',
+      'Backup-B/photo.jpg': 'photo',
+    });
+    await app.inject({
+      method: 'POST',
+      url: '/api/config/disable-dry-run',
+      payload: { phrase: 'I have reviewed the dry-run report' },
+    });
+    // 1) Scan with NO primary.
+    const scanResp = await app.inject({ method: 'POST', url: '/api/scans', payload: {} });
+    const scan = JSON.parse(scanResp.body);
+    expect(scan.report.sanityGuard.code).toBe('no_primary_set');
+
+    // 2) NOW mark a primary.
+    const cols = JSON.parse(
+      (await app.inject({ method: 'GET', url: '/api/collections' })).body,
+    );
+    const primary = cols.find((c: { relPath: string }) => c.relPath === 'Backup-A')!;
+    await app.inject({
+      method: 'POST',
+      url: '/api/collections/set-primary',
+      payload: { collectionId: primary.id },
+    });
+
+    // 3) Try to apply the stale plan → refused with structured error.
+    const blocked = await app.inject({
+      method: 'POST',
+      url: '/api/quarantine/run',
+      payload: { scanRunId: scan.runId },
+    });
+    expect(blocked.statusCode).toBe(400);
+    const body = JSON.parse(blocked.body);
+    expect(body.kind).toBe('sanity_guard');
+    expect(body.guard.code).toBe('primary_changed');
+    expect(body.error).toMatch(/changed since scan|rescan/i);
+  });
+
+  it('M15 round-3 — primary switched between scan and apply: /quarantine/run refuses with code=primary_changed', async () => {
+    // Regression for review on PR #6. Even with a primary set at scan
+    // time, switching to a different primary before /quarantine/run
+    // leaves the cached actions stale — they were shaped around the
+    // OLD primary's path priority. The recomputed pct check can't catch
+    // this. The route must compare scan-time vs current primary id and
+    // refuse on any mismatch.
+    await setup({
+      'Backup-A/photo.jpg': 'photo',
+      'Backup-B/photo.jpg': 'photo',
+    });
+    const cols = JSON.parse(
+      (await app.inject({ method: 'GET', url: '/api/collections' })).body,
+    );
+    const a = cols.find((c: { relPath: string }) => c.relPath === 'Backup-A')!;
+    const b = cols.find((c: { relPath: string }) => c.relPath === 'Backup-B')!;
+
+    // 1) Mark Backup-A primary.
+    await app.inject({
+      method: 'POST',
+      url: '/api/collections/set-primary',
+      payload: { collectionId: a.id },
+    });
+    await app.inject({
+      method: 'POST',
+      url: '/api/config/disable-dry-run',
+      payload: { phrase: 'I have reviewed the dry-run report' },
+    });
+
+    // 2) Scan.
+    const scan = JSON.parse(
+      (await app.inject({ method: 'POST', url: '/api/scans', payload: {} })).body,
+    );
+    expect(scan.report.sanityGuard.passed).toBe(true);
+    expect(scan.report.totalActions).toBeGreaterThan(0);
+
+    // 3) Switch primary to Backup-B.
+    await app.inject({
+      method: 'POST',
+      url: '/api/collections/set-primary',
+      payload: { collectionId: b.id },
+    });
+
+    // 4) Apply stale plan → refused.
+    const blocked = await app.inject({
+      method: 'POST',
+      url: '/api/quarantine/run',
+      payload: { scanRunId: scan.runId },
+    });
+    expect(blocked.statusCode).toBe(400);
+    const body = JSON.parse(blocked.body);
+    expect(body.kind).toBe('sanity_guard');
+    expect(body.guard.code).toBe('primary_changed');
+    expect(body.error).toMatch(/primary collection changed|rescan/i);
+  });
+
+  it('M15 — POST /quarantine/run with no primary set returns 400 sanity_guard with code=no_primary_set', async () => {
+    // Deliberately skip the set-primary call. With actions emitted by the
+    // classifier (cross-collection duplicate), the guard must refuse.
+    await setup({
+      'Backup-A/photo.jpg': 'photo',
+      'Backup-B/photo.jpg': 'photo',
+    });
+    // Disable dry-run so the only remaining gate is the sanity guard. Without
+    // this, the route would 400 with kind=dry_run_gate first.
+    await app.inject({
+      method: 'POST',
+      url: '/api/config/disable-dry-run',
+      payload: { phrase: 'I have reviewed the dry-run report' },
+    });
+    const scanResp = await app.inject({ method: 'POST', url: '/api/scans', payload: {} });
+    expect(scanResp.statusCode).toBe(200);
+    const scan = JSON.parse(scanResp.body);
+    expect(scan.report.sanityGuard.passed).toBe(false);
+    expect(scan.report.sanityGuard.code).toBe('no_primary_set');
+
+    const qResp = await app.inject({
+      method: 'POST',
+      url: '/api/quarantine/run',
+      payload: { scanRunId: scan.runId },
+    });
+    expect(qResp.statusCode).toBe(400);
+    const body = JSON.parse(qResp.body);
+    expect(body.kind).toBe('sanity_guard');
+    expect(body.guard.code).toBe('no_primary_set');
+    // ignoreSanityGuard=true must still bypass — keeps the override hatch
+    // working for the user who knows what they're doing (out-of-band cleanup
+    // before they've marked a primary).
+    const overridden = await app.inject({
+      method: 'POST',
+      url: '/api/quarantine/run',
+      payload: { scanRunId: scan.runId, ignoreSanityGuard: true },
+    });
+    expect(overridden.statusCode).toBe(200);
+  });
+
   it('GET /scans returns the run history; GET /scans/:id returns the run + report', async () => {
     await setup({ 'A/x.txt': 'a' });
     const r = await app.inject({ method: 'POST', url: '/api/scans', payload: {} });

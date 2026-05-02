@@ -191,15 +191,15 @@ Closed in PR `docs/ai-context-structure`. The seven doc/code drift items catalog
 - ✅ **D-6 embedded HTML fallback.** README layout no longer references the embedded fallback; full code-side removal stays under M13 (ship-to-real-data).
 - ✅ **D-7 AGENTS.md "five files".** Section renamed; PLAN's canonical list updated to enumerate every safety-critical file with a one-line note each.
 
-### ⬜ M15. Sanity guard fail-closed without primary
+### ✅ M15. Sanity guard fail-closed without primary
 
-Today, [`src/orchestrator/sanityGuard.ts`](./src/orchestrator/sanityGuard.ts) returns `passed: true` vacuously when no primary collection is set — see [`docs/known-gaps.md`](./docs/known-gaps.md) item SG-1. **A `target_root` with no primary has zero sanity-guarding.**
+Closed: [`src/orchestrator/sanityGuard.ts`](./src/orchestrator/sanityGuard.ts) used to return `passed: true` vacuously when no primary collection was set ([`docs/known-gaps.md`](./docs/known-gaps.md) item SG-1) — a `target_root` with no primary had zero sanity-guarding. Now:
 
-Fix:
-
-- Refuse the run with a structured error (`SanityGuardError` with `reason: 'no_primary_set'`) when `getPrimary(db)` returns null and the run is not a no-op.
-- Surface in the UI: dashboard warns "no primary set — quarantine disabled" until the user marks one.
-- Add a unit + contract test that the no-primary case **fails closed**.
+- ✅ `checkSanityGuard` returns `passed: false` with a new `code: 'no_primary_set'` field when `getPrimary(db)` is null **and** at least one action would fire. No-op runs (zero actions) still pass — the guard fires only when there's something to refuse.
+- ✅ `SanityGuardResult.code` (`'no_primary_set' | 'pct_exceeded' | null`) lets the UI / API clients branch on a stable identifier instead of parsing `reason` prose. Wired through `src/server/schemas.ts` and `web/src/lib/apiClient.ts`.
+- ✅ Dashboard surfaces a red banner — "No primary collection set — quarantine disabled" — until the user marks one. The last-scan summary swaps the trip-message header to "Quarantine refused — no primary set" when `code === 'no_primary_set'` (skipping the percentage-figures line that's irrelevant in that branch).
+- ✅ `runQuarantineJob` throws `SanityGuardError` (carrying `guard.code === 'no_primary_set'`) — the existing `ignoreSanityGuard` override still bypasses, leaving an escape hatch for the user who knows what they're doing.
+- ✅ Tests: `tests/unit/sanityGuard.test.ts` (3 cases — vacuous-no-actions pass, populated-no-primary fail-closed, primary-set-passes), `tests/integration/quarantine.test.ts` gained "M15 — sanity guard fails closed when no primary is set and actions are non-empty", `tests/contract/api.test.ts` gained "M15 — POST /quarantine/run with no primary set returns 400 sanity_guard with code=no_primary_set" (also asserts `ignoreSanityGuard=true` bypass), `web/src/pages/__tests__/Dashboard.test.tsx` gained 2 cases for banner show/hide. Final tally: **154 server tests, 33 web tests — all green.**
 
 ### ⬜ M16. Persist `runStore` to disk
 

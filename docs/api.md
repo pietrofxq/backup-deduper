@@ -57,10 +57,32 @@ a discriminator add a `kind` field:
     "plannedBytes": 90000000,
     "filesPct": 0.65,
     "bytesPct": 0.73,
-    "reason": "files 65.0% > 50% and bytes 73.0% > 70%"
+    "reason": "files 65.0% > 50% and bytes 73.0% > 70%",
+    "code": "pct_exceeded"
   }
 }
 ```
+
+`code` is a stable identifier for the failure mode. Each value has
+exactly one origin so clients can branch unambiguously:
+
+- `'no_primary_set'` — emitted by `checkSanityGuard` when the
+  *current* primary is null and the run would do anything (file
+  action or empty-dir removal). Live signal — user marks a primary,
+  then can re-attempt.
+- `'primary_changed'` — emitted by `runQuarantineJob` whenever the
+  cached scan's `scanPrimaryId` differs from the current primary in
+  any direction (null→A, A→null, A→B). Stale signal — user must
+  rescan to refresh the plan even if a (possibly different) primary
+  is now set.
+- `'pct_exceeded'` — planned actions exceed the configured files /
+  bytes percentage of the current primary collection.
+- `null` when `passed === true`.
+
+`POST /api/quarantine/run` enforces the stale-plan refusal by
+comparing `cached.scanPrimaryId` to the current primary at apply time;
+the recomputed pct guard cannot catch a primary-switch on its own.
+Pass `ignoreSanityGuard: true` to override.
 
 `UnreadableSubtreeError` includes `unreadablePaths` and `collectionRelPath`.
 
