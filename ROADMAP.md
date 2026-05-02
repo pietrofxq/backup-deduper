@@ -233,6 +233,36 @@ ROADMAP backlog #13 today covers the scanner pool only. The mover (`quarantine.t
 - Move `hashFileSync` to a `worker_threads` pool so the event loop stays responsive during quarantine of large files.
 - Profile first; defer the change if median quarantine wall-clock is acceptable.
 
+### ⬜ M20. First-run install wizard
+
+A guided first-launch flow so the user never hits the "no primary set" footgun (which M15 makes fail-closed) and never has to know that "active preset" is a config key. Sequenced **after** M9 (which shipped the picker components), M12 (type-to-confirm pattern), and M15 (sanity-guard fail-closed safety net), and **before** M13 (ship-to-real-data) — the wizard is the de-facto first contact with real data.
+
+**Shape (chosen):** server-launched flow. The user keeps starting the tool with `TARGET_ROOT=…`; the wizard is purely the in-browser confirmation/picker step that runs on first connect. Rejected the in-app path-entry shape (would let an attacker who reaches `:7777` re-bind the sentinel/DB to a sensitive directory; not worth the safety surface vs. asking users to set the env var).
+
+Steps:
+
+- ⬜ **Wizard gate.** Add `wizard_completed_at: z.string().nullable().default(null)` to `ConfigSchema` ([src/config/schema.ts](./src/config/schema.ts)). Not gated — the wizard's `POST /api/wizard/complete` is the only writer. The `PUT /api/config` `.strict()` filter passes through non-gated keys, so no GATED_CONFIG_KEYS change.
+- ⬜ **First-run detection.** `GET /api/health` (or a new `GET /api/wizard/status`) returns `{ wizardRequired: boolean }` based on `wizard_completed_at === null` AND `getPrimary(db) === null`. The SPA's root route redirects to `/wizard` when `wizardRequired` is true.
+- ⬜ **`/wizard` page.** Four screens, single-page-stack; back/next not routes:
+  1. **Confirm target.** Show the resolved absolute `target_root` (returned by `GET /api/health`), the sentinel UUID, the OS platform. The user types `confirm` to advance — same affordance as M12's type-to-confirm. Refusing here just means "stop the tool and re-launch with a different `TARGET_ROOT`".
+  2. **Discovered collections.** Lists subfolders found by `discoverCollections` ([src/scanner/index.ts](./src/scanner/index.ts)). Read-only — collections are auto-discovered, not user-managed. Pre-flight summary: file counts via `GET /api/collections/preview` (new lightweight endpoint that runs `walkCollection` count-only, no hashing).
+  3. **Pick primary.** Radio list of collections; calls `POST /api/collections/primary`. Required; cannot advance without selection. This is what makes M15's safety net invisible to first-time users.
+  4. **Pick preset.** Dropdown over `GET /api/presets`; defaults to `Samsung Android phone backup`. Calls `PUT /api/config { active_preset }`. Shows rule/whitelist/priority counts under the dropdown (same component as M9's Settings card).
+- ⬜ **Finish.** `POST /api/wizard/complete` sets `wizard_completed_at` and redirects to `/` (Dashboard). The Dashboard's existing dry-run banner takes over from there.
+- ⬜ **Re-entry.** Settings page already exposes primary picker + preset dropdown (M9), so the wizard is genuinely one-time. No "redo wizard" button in v1; if the user really wants to, they delete `wizard_completed_at` from the `config` table by hand or use a hidden `POST /api/wizard/reset` (out of scope here).
+- ⬜ **Persistence:** all already shipped — `config` KV (M1), `collection.is_primary` partial unique index (M1), zod-validated config (M6/M9). Only the new key `wizard_completed_at` is added.
+- ⬜ **Tests:**
+  - Server: contract test for `GET /api/wizard/status`, `POST /api/wizard/complete`, idempotence of complete, refusal to complete without primary.
+  - Web: component tests for each step; snapshot of the redirect-to-wizard behavior.
+
+**Out of scope for v1 wizard:**
+
+- Multi-target_root management (Phase 2).
+- Editing `target_root` from inside the app (would re-bind sentinel — out of scope; relaunch with a new env var).
+- Custom presets or rule editors in the wizard (Settings can do this in Phase 2 as a JSON textarea; the wizard is happy-path only).
+
+See also: [docs/workflows/install-wizard.md](./docs/workflows/install-wizard.md) for the implementation guide.
+
 ---
 
 ## Suggestion backlog from the post-implementation code review

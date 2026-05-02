@@ -18,6 +18,12 @@ in and `JSON.parse`d on the way out.
 | `sanity_guard_files_pct` | `float 0..1` | `0.5` | no |
 | `sanity_guard_bytes_pct` | `float 0..1` | `0.7` | no |
 
+Planned (ROADMAP M20):
+
+| key | type | default | gated? |
+|-----|------|---------|--------|
+| `wizard_completed_at` | `string \| null` (ISO datetime) | `null` | no — see [workflows/install-wizard.md](workflows/install-wizard.md) anti-patterns |
+
 `DEFAULT_CONFIG` is `ConfigSchema.parse({})` — anything missing from the DB
 falls through to the schema default.
 

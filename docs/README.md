@@ -24,6 +24,7 @@ function lives, what a column means, what wire shape a route returns.
 | Add or modify a preset | [classifier.md](classifier.md), [workflows/adding-a-preset.md](workflows/adding-a-preset.md) |
 | Change classifier rule precedence | [classifier.md](classifier.md), [safety-model.md](safety-model.md) |
 | Touch config keys | [config.md](config.md) |
+| Build the first-run wizard | [workflows/install-wizard.md](workflows/install-wizard.md) (planned: ROADMAP M20) |
 | Investigate a Windows/macOS bug | [conventions.md](conventions.md) §cross-platform |
 | Pick the "why" behind a non-obvious choice | [decisions/](decisions/) |
 | Audit what's broken or deferred | [known-gaps.md](known-gaps.md), [`ROADMAP.md`](../ROADMAP.md) |
@@ -49,7 +50,8 @@ docs/
     ├── adding-an-api-route.md
     ├── adding-a-preset.md
     ├── adding-a-mover-op.md
-    └── changing-the-schema.md
+    ├── changing-the-schema.md
+    └── install-wizard.md      M20 first-run wizard implementation guide
 ```
 
 ## Doc maintenance contract
