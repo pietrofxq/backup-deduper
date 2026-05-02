@@ -26,10 +26,19 @@ Before you write code:
    breaks one of the 8 in [safety-model.md](../safety-model.md), stop —
    talk to a maintainer.
 3. **Decide which path-fence pair applies.** Every destructive op fences
-   both sides:
-   - live-tree side: `isPathWithin(targetRoot, …)`
-   - trash side: `isPathWithin(trashDir, …)` AND `realpathSync` if you
-     touch any user-controllable path.
+   both sides. The exact rule depends on whether your op renames or
+   unlinks ([safety-model.md §"Path containment fences"](../safety-model.md)):
+   - live-tree side: `isPathWithin(targetRoot, …)`.
+   - trash side: `isPathWithin(trashDir, …)`.
+   - **`realpathSync` is required *only* for `unlink`-style ops** (today
+     just `purge`), because a symlink injected inside `.dedupe-trash/`
+     could point outside it and the `unlink` would silently follow path
+     resolution. Rename-based ops (`quarantine`, `restore`) use
+     `isPathWithin` alone — `fs.renameSync` operates on the link itself,
+     not what it points at, so the symlink-injection threat doesn't
+     apply. If you're adding a fourth op, decide based on the syscall
+     it ends up making, not based on "does it touch user-controllable
+     paths" (every destructive op does).
 
 ## The mandatory checklist
 

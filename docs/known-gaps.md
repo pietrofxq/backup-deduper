@@ -60,14 +60,19 @@ data — included for the maintainer's ranking pass.
 | #25 | Cruft TOCTOU | Document only; null-hash cruft is low-stakes. |
 | #27 | O(n²) name-collision groups | Add a soft cap (e.g. 1k pairs per basename) and a UI warning rather than a fix. |
 
-## Roadmap entries to add
+## Roadmap entries added in this PR
 
-Suggested new line items for ROADMAP.md (the next pass — see also the
-ROADMAP update committed alongside this docs set):
+These were added to [`ROADMAP.md`](../ROADMAP.md) alongside this docs set. The
+authoritative status is in `ROADMAP.md`; this list is a quick cross-reference.
 
-- **M14. Documentation drift cleanup.** Close items D-1 through D-7 above.
+- **M14. Documentation drift cleanup.** ✅ closed in this PR — items D-1
+  through D-7 above resolved.
 - **M15. Sanity guard fail-closed without primary** (SG-1).
 - **M16. Persist `runStore` to disk** (#21 promoted) so quarantine survives
   a restart.
 - **M17. Audit-page surface for errored actions** (#7 promoted).
 - **M18. Path-prefix anchoring** (#11 promoted).
+- **M19. Mover-side hashing on a worker** (extends backlog #13 from the
+  scanner pool to the mover/restore/reconcile call sites).
+- **M20. First-run install wizard** — guided primary + preset confirmation,
+  shape (1) server-launched flow only.

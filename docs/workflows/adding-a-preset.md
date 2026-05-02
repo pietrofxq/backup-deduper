@@ -22,7 +22,7 @@ Add a file under [src/presets/](../../src/presets/) named
 // src/presets/ios-backup.ts
 import type { Preset } from './types.js';
 
-export const iosBackupPreset: Preset = {
+export const IOS_BACKUP: Preset = {
   name: 'iOS device backup',
   description:
     'A preset for iTunes/Finder iOS backups. Excludes iCloud sync placeholders.',
@@ -64,24 +64,31 @@ something is wrong.
 
 ## Step 3 — Register it
 
-Add the preset to the built-in registry:
+Add the preset to the built-in registry. The actual symbol names matter —
+the existing builtins use SCREAMING_SNAKE_CASE (`SAMSUNG_ANDROID`,
+`MINIMAL`); follow the same convention:
 
 ```ts
 // src/presets/registry.ts
-import { samsungAndroidPreset } from './samsung-android.js';
-import { minimalPreset } from './minimal.js';
-import { iosBackupPreset } from './ios-backup.js';
+import { SAMSUNG_ANDROID } from './samsung-android.js';
+import { MINIMAL } from './minimal.js';
+import { IOS_BACKUP } from './ios-backup.js';
 
-export const BUILTIN_PRESETS: Preset[] = [
-  samsungAndroidPreset,
-  minimalPreset,
-  iosBackupPreset,    // ← new
+const BUILTINS: ReadonlyArray<Preset> = [
+  SAMSUNG_ANDROID,
+  MINIMAL,
+  IOS_BACKUP,           // ← new
 ];
+
+export function builtinPresets(): ReadonlyArray<Preset> {
+  return BUILTINS;
+}
 ```
 
-`seedBuiltinPresets` is called on every boot and upserts each row with
-`is_builtin = 1`. Existing rows with the same `name` are updated, so you
-can safely tweak rules between releases without manual migration.
+`seedBuiltinPresets` (also in `registry.ts`) is called on every boot and
+upserts each row with `is_builtin = 1`. Existing rows with the same `name`
+are updated, so you can safely tweak rules between releases without manual
+migration.
 
 ## Step 4 — Test it
 
@@ -89,7 +96,7 @@ Add a unit test in [tests/unit/presets.test.ts](../../tests/unit/presets.test.ts
 
 ```ts
 test('iOS backup preset round-trips through zod', () => {
-  expect(() => PresetSchema.parse(iosBackupPreset)).not.toThrow();
+  expect(() => PresetSchema.parse(IOS_BACKUP)).not.toThrow();
 });
 
 test('iOS backup whitelist (if any) beats every cruft rule', () => {

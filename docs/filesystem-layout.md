@@ -117,7 +117,7 @@ Notes:
 | `audit.jsonl` | same |
 | `.dedupe-trash/` | quarantine *must* be on the same volume so renames are atomic — see [safety-model.md](safety-model.md) §8 |
 | `target-id.txt` | the target's identity. Travels with the data, not the install. |
-| `reports/<runId>.json` | persists the dry-run report so the user can re-open it after the in-memory `runStore` cache is gone |
+| `reports/<runId>.json` | durable on-disk copy of each scan's dry-run report for manual inspection (`jq`, grep, sharing with a maintainer). The server does **not** currently reload these — `GET /api/scans/:id` returns `null` for `report` once the in-memory `runStore` cache has evicted the entry. ROADMAP M16 is about wiring a programmatic reload from disk. |
 
 ## What does NOT live in `<target_root>`
 

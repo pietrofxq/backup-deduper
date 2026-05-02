@@ -1,8 +1,8 @@
 # Architecture
 
-Single Node 20 process. Fastify serves a React SPA at `/` and a REST + SSE
-API under `/api`. State lives in a `better-sqlite3` database inside
-`<target_root>/.dedupe/`.
+Single Node 20+ process (`engines.node = ">=20"`; CI exercises Node 20 and
+22). Fastify serves a React SPA at `/` and a REST + SSE API under `/api`.
+State lives in a `better-sqlite3` database inside `<target_root>/.dedupe/`.
 
 ## Process model
 

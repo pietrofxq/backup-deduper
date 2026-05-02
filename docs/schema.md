@@ -6,14 +6,20 @@ SQLite database at `<target_root>/.dedupe/state.db`. WAL mode,
 The schema is defined in Drizzle:
 [src/db/schema.ts](../src/db/schema.ts). Migrations are
 **generated** by `drizzle-kit generate` into
-[src/db/migrations/](../src/db/migrations/) — do not handwrite SQL there.
+[src/db/migrations/](../src/db/migrations/). Prefer the generated SQL;
+hand-edit a migration only when `drizzle-kit` cannot express the change
+(typical: SQLite ALTER limitations requiring a table-rebuild). See
+[workflows/changing-the-schema.md](workflows/changing-the-schema.md) for
+the rules around hand-editing.
+
 The migration runner is custom, deliberately tiny:
 [src/db/index.ts:79–113 `migrate()`](../src/db/index.ts).
 
-> **Naming note:** PLAN.md mentioned `001_initial.sql`. Drizzle generated
-> `0000_initial.sql`. The migration runner accepts any `^\d+_.+\.sql$`, so
-> the real file is what matters. AGENTS.md has been updated; PLAN may still
-> say 001 — see [known-gaps.md](known-gaps.md).
+> **Naming note:** the migration runner accepts any file matching
+> `^\d+_.+\.sql$`. The current initial migration is `0000_initial.sql`
+> (Drizzle's default zero-padding); earlier drafts of PLAN.md referenced
+> `001_initial.sql` — that drift was closed in PR
+> `docs/ai-context-structure` (M14).
 
 ## ERD (text form)
 
